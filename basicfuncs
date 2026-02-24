@@ -599,3 +599,200 @@ if RunService:IsServer() then
 end
 
 return EBModule
+
+-- ============================================================
+-- REMOTES EXTRAS PARA ADMIN (adicionados na v2.0)
+-- ============================================================
+
+local AdminSetDivisao  = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSetDivisao")
+local AdminSetCDP      = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSetCDP")
+local AdminResetStats  = getOrCreate(RemotesFolder, "RemoteEvent", "AdminResetStats")
+local AdminSetTime     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSetTime")
+local AdminUnban       = getOrCreate(RemotesFolder, "RemoteEvent", "AdminUnban")
+local AdminGodMode     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminGodMode")
+local AdminFreeze      = getOrCreate(RemotesFolder, "RemoteEvent", "AdminFreeze")
+local AdminKillPlayer  = getOrCreate(RemotesFolder, "RemoteEvent", "AdminKillPlayer")
+local AdminSpeedSet    = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSpeedSet")
+local AdminJumpSet     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminJumpSet")
+local AdminMessage     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminMessage")
+local AdminShutdown    = getOrCreate(RemotesFolder, "RemoteEvent", "AdminShutdown")
+local AdminBringPlayer = getOrCreate(RemotesFolder, "RemoteEvent", "AdminBringPlayer")
+
+-- Tabela de GodMode e Freeze ativos
+local godModePlayers = {}
+local frozenPlayers  = {}
+
+-- Valida se quem chama tem permissão de admin
+local function isAuthorized(player)
+	local data = playerDataCache[player.UserId]
+	local devs = {"sydgei10","BolinhoFofo1236"}
+	for _, d in pairs(devs) do
+		if d:lower() == player.Name:lower() then return true end
+	end
+	if data and (data.Team == "Honra [EB]") then return true end
+	return false
+end
+
+-- AdminSetDivisao
+AdminSetDivisao.OnServerEvent:Connect(function(req, target, div)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local data = playerDataCache[target.UserId]
+	if not data then return end
+	data.Divisao = div
+	savePlayerData(target, data)
+	updateOverhead(target, data.Patente, div)
+	UpdateUIRemote:FireClient(target, data)
+end)
+
+-- AdminSetCDP
+AdminSetCDP.OnServerEvent:Connect(function(req, target, val)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local data = playerDataCache[target.UserId]
+	if not data then return end
+	data.CDP = val or 0
+	local ls = target:FindFirstChild("leaderstats")
+	if ls and ls:FindFirstChild("CDP") then ls.CDP.Value = val end
+	savePlayerData(target, data)
+end)
+
+-- AdminResetStats
+AdminResetStats.OnServerEvent:Connect(function(req, target)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local data = playerDataCache[target.UserId]
+	if not data then return end
+	data.Dinheiro = 0; data.CDP = 0
+	local ls = target:FindFirstChild("leaderstats")
+	if ls then
+		if ls:FindFirstChild("Dinheiro") then ls.Dinheiro.Value = 0 end
+		if ls:FindFirstChild("CDP") then ls.CDP.Value = 0 end
+	end
+	savePlayerData(target, data)
+	UpdateUIRemote:FireClient(target, data)
+end)
+
+-- AdminSetTime (move jogador para um time específico)
+AdminSetTime.OnServerEvent:Connect(function(req, target, teamName)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local data = playerDataCache[target.UserId]
+	if not data then return end
+	data.Team = teamName
+	setPlayerTeam(target, teamName)
+	savePlayerData(target, data)
+end)
+
+-- AdminUnban (por UserId)
+AdminUnban.OnServerEvent:Connect(function(req, userId)
+	if not isAuthorized(req) then return end
+	local BanStore = game:GetService("DataStoreService"):GetDataStore("EBBanList_v1")
+	pcall(function() BanStore:RemoveAsync("Ban_"..tostring(userId)) end)
+	print("[EB-ADMIN] Unban aplicado para UserID: "..tostring(userId))
+end)
+
+-- AdminGodMode
+AdminGodMode.OnServerEvent:Connect(function(req, target)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local char = target.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	godModePlayers[target.UserId] = not godModePlayers[target.UserId]
+	if godModePlayers[target.UserId] then
+		hum.MaxHealth = math.huge
+		hum.Health    = math.huge
+	else
+		hum.MaxHealth = 100
+		hum.Health    = 100
+	end
+end)
+
+-- AdminFreeze
+AdminFreeze.OnServerEvent:Connect(function(req, target)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local char = target.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	frozenPlayers[target.UserId] = not frozenPlayers[target.UserId]
+	hrp.Anchored = frozenPlayers[target.UserId]
+end)
+
+-- AdminKillPlayer
+AdminKillPlayer.OnServerEvent:Connect(function(req, target)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local char = target.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then hum.Health = 0 end
+end)
+
+-- AdminSpeedSet
+AdminSpeedSet.OnServerEvent:Connect(function(req, target, speed)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local char = target.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then hum.WalkSpeed = math.clamp(speed or 16, 0, 500) end
+end)
+
+-- AdminJumpSet
+AdminJumpSet.OnServerEvent:Connect(function(req, target, power)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	local char = target.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then hum.JumpPower = math.clamp(power or 50, 0, 500) end
+end)
+
+-- AdminMessage (exibe hint/mensagem na tela do jogador alvo)
+local AdminMsgClient = getOrCreate(RemotesFolder, "RemoteEvent", "AdminMsgClient")
+AdminMessage.OnServerEvent:Connect(function(req, dest, msg)
+	if not isAuthorized(req) then return end
+	if dest:lower() == "todos" or dest:lower() == "all" then
+		for _, p in pairs(Players:GetPlayers()) do
+			AdminMsgClient:FireClient(p, msg, req.Name)
+		end
+	else
+		local tp = nil
+		for _, p in pairs(Players:GetPlayers()) do
+			if p.Name:lower()==dest:lower() then tp=p; break end
+		end
+		if tp then AdminMsgClient:FireClient(tp, msg, req.Name) end
+	end
+end)
+
+-- AdminShutdown
+AdminShutdown.OnServerEvent:Connect(function(req)
+	if not isAuthorized(req) then return end
+	print("[EB-ADMIN] Shutdown iniciado por "..req.Name)
+	for _, p in pairs(Players:GetPlayers()) do
+		p:Kick("🔴 O servidor foi encerrado pela administração.\nEntre novamente em breve.")
+	end
+end)
+
+-- AdminBringPlayer (bring target to dest)
+AdminBringPlayer.OnServerEvent:Connect(function(req, target, dest)
+	if not isAuthorized(req) then return end
+	if not target or not target.Parent then return end
+	if not dest or not dest.Parent then return end
+	local dChar = dest.Character
+	local dHRP  = dChar and dChar:FindFirstChild("HumanoidRootPart")
+	local tChar = target.Character
+	local tHRP  = tChar and tChar:FindFirstChild("HumanoidRootPart")
+	if dHRP and tHRP then
+		tHRP.CFrame = dHRP.CFrame + Vector3.new(math.random(-3,3),0,math.random(-3,3))
+	end
+end)
+
+-- Mensagem de admin no cliente (recepção)
+-- (este handler fica no definitionconfigs — aqui só registramos o remote)
+
+print("[EB] Remotes de Admin v2.0 registrados!")
