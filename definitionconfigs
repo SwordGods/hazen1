@@ -1,1 +1,1216 @@
+-- ██████╗ ███████╗███████╗██╗███╗   ██╗██╗████████╗██╗ ██████╗ ███╗   ██╗
+-- ██╔══██╗██╔════╝██╔════╝██║████╗  ██║██║╚══██╔══╝██║██╔═══██╗████╗  ██║
+-- ██║  ██║█████╗  █████╗  ██║██╔██╗ ██║██║   ██║   ██║██║   ██║██╔██╗ ██║
+-- ██║  ██║██╔══╝  ██╔══╝  ██║██║╚██╗██║██║   ██║   ██║██║   ██║██║╚██╗██║
+-- ██████╔╝███████╗██║     ██║██║ ╚████║██║   ██║   ██║╚██████╔╝██║ ╚████║
+-- ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+-- Exército Brasileiro ROBLOX - definitionconfigs v1.0
+-- Painéis: Graduados, Oficiais, Oficiais Superiores, Honra, Admin, Dev
 
+-- ============================================================
+-- Este script roda no CLIENT (LocalScript via EBLoader)
+-- ============================================================
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Aguarda remotes
+local RemotesFolder = ReplicatedStorage:WaitForChild("EBRemotes", 15)
+local UpdateUIRemote   = RemotesFolder:WaitForChild("UpdateUI", 10)
+local SetPatenteRemote = RemotesFolder:WaitForChild("SetPatente", 10)
+local SetDivisaoRemote = RemotesFolder:WaitForChild("SetDivisao", 10)
+local SetDinheiroRemote = RemotesFolder:WaitForChild("SetDinheiro", 10)
+local GetPlayerDataRemote = RemotesFolder:WaitForChild("GetPlayerData", 10)
+
+-- Remote de Admin (criado aqui)
+local AdminRemote = RemotesFolder:FindFirstChild("AdminCommand")
+if not AdminRemote then
+	-- Servidor cria, aqui apenas aguardamos
+end
+
+-- ============================================================
+-- LISTAS E CONFIGURAÇÕES
+-- ============================================================
+
+local ADMIN_LIST_URL = "https://raw.githubusercontent.com/SwordGods/hazen1/refs/heads/main/managementlist"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1227399866301284483/3mHVx1HSxxUwlbHoOP3bLvp7jF59MTfkwa1mMsfd3BZMmOwwAzOsAmxi3ssirK2_q5wd"
+
+local DEVELOPERS = {"sydgei10", "BolinhoFofo1236"}
+local UNBANNABLES = {"sydgei10", "BolinhoFofo1236"}
+
+-- Patentes por nível de permissão
+local PATENTES_GRADUADOS = {"Recruta"}
+
+local PATENTES_OFICIAIS = {
+	"Soldado", "Cabo",
+	"Terceiro Sargento", "Segundo Sargento",
+	"Primeiro Sargento", "Subtenente"
+}
+
+local PATENTES_OFICIAIS_SUP = {
+	"Soldado", "Cabo",
+	"Terceiro Sargento", "Segundo Sargento",
+	"Primeiro Sargento", "Subtenente",
+	"Segundo Tenente", "Primeiro Tenente", "Capitao"
+}
+
+local PATENTES_HONRA = {
+	"Soldado", "Cabo",
+	"Terceiro Sargento", "Segundo Sargento",
+	"Primeiro Sargento", "Subtenente",
+	"Segundo Tenente", "Primeiro Tenente", "Capitao",
+	"Major", "Tenente Coronel", "Coronel"
+}
+
+local PATENTE_CORES = {
+	["Civil"]            = Color3.fromRGB(200, 200, 200),
+	["Recruta"]          = Color3.fromRGB(144, 238, 144),
+	["Soldado"]          = Color3.fromRGB(124, 210, 124),
+	["Cabo"]             = Color3.fromRGB(100, 185, 100),
+	["Terceiro Sargento"]= Color3.fromRGB(70, 160, 70),
+	["Segundo Sargento"] = Color3.fromRGB(50, 140, 50),
+	["Primeiro Sargento"]= Color3.fromRGB(30, 120, 30),
+	["Subtenente"]       = Color3.fromRGB(10, 100, 10),
+	["Segundo Tenente"]  = Color3.fromRGB(255, 100, 100),
+	["Primeiro Tenente"] = Color3.fromRGB(230, 70, 70),
+	["Capitao"]          = Color3.fromRGB(200, 40, 40),
+	["Major"]            = Color3.fromRGB(100, 149, 237),
+	["Tenente Coronel"]  = Color3.fromRGB(65, 105, 225),
+	["Coronel"]          = Color3.fromRGB(30, 60, 200),
+	["Marechal"]         = Color3.fromRGB(255, 215, 0),
+}
+
+-- ============================================================
+-- DADOS LOCAIS DO JOGADOR
+-- ============================================================
+
+local localPlayerData = {
+	Patente = "Civil",
+	Divisao = "Nenhuma",
+	Dinheiro = 0,
+	CDP = 0,
+	Team = "Civis [EB]",
+}
+
+-- ============================================================
+-- UTILITÁRIOS DE UI
+-- ============================================================
+
+local function tween(obj, props, duration, style, direction)
+	style = style or Enum.EasingStyle.Quart
+	direction = direction or Enum.EasingDirection.Out
+	local info = TweenInfo.new(duration or 0.3, style, direction)
+	TweenService:Create(obj, info, props):Play()
+end
+
+local function makeCorner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 8)
+	c.Parent = parent
+	return c
+end
+
+local function makeStroke(parent, color, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = color or Color3.fromRGB(60, 60, 70)
+	s.Thickness = thickness or 1.5
+	s.Parent = parent
+	return s
+end
+
+local function makeFrame(parent, size, pos, color, trans)
+	local f = Instance.new("Frame")
+	f.Size = size or UDim2.new(1,0,1,0)
+	f.Position = pos or UDim2.new(0,0,0,0)
+	f.BackgroundColor3 = color or Color3.fromRGB(25, 25, 35)
+	f.BackgroundTransparency = trans or 0
+	f.BorderSizePixel = 0
+	f.Parent = parent
+	return f
+end
+
+local function makeLabel(parent, text, size, pos, font, textSize, color, xAlign)
+	local l = Instance.new("TextLabel")
+	l.Size = size or UDim2.new(1,0,0,30)
+	l.Position = pos or UDim2.new(0,0,0,0)
+	l.BackgroundTransparency = 1
+	l.Text = text or ""
+	l.Font = font or Enum.Font.GothamBold
+	l.TextSize = textSize or 14
+	l.TextColor3 = color or Color3.fromRGB(255,255,255)
+	l.TextXAlignment = xAlign or Enum.TextXAlignment.Center
+	l.Parent = parent
+	return l
+end
+
+local function makeButton(parent, text, size, pos, bgColor)
+	local b = Instance.new("TextButton")
+	b.Size = size or UDim2.new(1,-20,0,38)
+	b.Position = pos or UDim2.new(0,10,0,0)
+	b.BackgroundColor3 = bgColor or Color3.fromRGB(0, 120, 212)
+	b.BorderSizePixel = 0
+	b.Text = text or "Botão"
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 14
+	b.TextColor3 = Color3.fromRGB(255,255,255)
+	b.AutoButtonColor = false
+	b.Parent = parent
+
+	-- Hover effect
+	b.MouseEnter:Connect(function()
+		tween(b, {BackgroundColor3 = b.BackgroundColor3:lerp(Color3.fromRGB(255,255,255), 0.15)}, 0.15)
+	end)
+	b.MouseLeave:Connect(function()
+		tween(b, {BackgroundColor3 = bgColor or Color3.fromRGB(0, 120, 212)}, 0.15)
+	end)
+
+	return b
+end
+
+local function makeTextBox(parent, placeholder, size, pos)
+	local tb = Instance.new("TextBox")
+	tb.Size = size or UDim2.new(1,-20,0,36)
+	tb.Position = pos or UDim2.new(0,10,0,0)
+	tb.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+	tb.BorderSizePixel = 0
+	tb.Text = ""
+	tb.PlaceholderText = placeholder or "Digite aqui..."
+	tb.PlaceholderColor3 = Color3.fromRGB(120,120,140)
+	tb.Font = Enum.Font.Gotham
+	tb.TextSize = 13
+	tb.TextColor3 = Color3.fromRGB(220,220,240)
+	tb.TextXAlignment = Enum.TextXAlignment.Left
+	tb.Parent = parent
+	makeCorner(tb, 6)
+	makeStroke(tb, Color3.fromRGB(80,80,100), 1)
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 10)
+	padding.Parent = tb
+	return tb
+end
+
+-- Botão flutuante (canto da tela)
+local function makeSideButton(icon, bgColor, yPos, parent)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 48, 0, 48)
+	btn.Position = UDim2.new(1, -60, 0, yPos)
+	btn.BackgroundColor3 = bgColor or Color3.fromRGB(20, 20, 30)
+	btn.BorderSizePixel = 0
+	btn.Text = icon or "?"
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 22
+	btn.TextColor3 = Color3.fromRGB(255,255,255)
+	btn.AutoButtonColor = false
+	btn.Parent = parent
+	makeCorner(btn, 12)
+	makeStroke(btn, Color3.fromRGB(80,80,120), 2)
+
+	btn.MouseEnter:Connect(function()
+		tween(btn, {Size = UDim2.new(0, 54, 0, 54), Position = UDim2.new(1,-63, 0, yPos-3)}, 0.15)
+	end)
+	btn.MouseLeave:Connect(function()
+		tween(btn, {Size = UDim2.new(0, 48, 0, 48), Position = UDim2.new(1,-60, 0, yPos)}, 0.15)
+	end)
+	return btn
+end
+
+-- Painel base com título e X
+local function makePanel(title, width, height)
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "EB_Panel_" .. title:gsub(" ", "_")
+	gui.ResetOnSpawn = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Parent = PlayerGui
+
+	-- Overlay escuro
+	local overlay = makeFrame(gui, UDim2.new(1,0,1,0), UDim2.new(0,0,0,0), Color3.fromRGB(0,0,0), 0.6)
+	overlay.ZIndex = 1
+
+	-- Painel principal
+	local panel = makeFrame(gui, UDim2.new(0, width, 0, height), UDim2.new(0.5, -width/2, 0.5, -height/2), Color3.fromRGB(15, 15, 25))
+	panel.ZIndex = 2
+	makeCorner(panel, 14)
+	makeStroke(panel, Color3.fromRGB(50, 50, 80), 2)
+
+	-- Sombra
+	local shadow = makeFrame(gui, UDim2.new(0, width+20, 0, height+20), UDim2.new(0.5, -(width+20)/2, 0.5, -(height+20)/2), Color3.fromRGB(0,0,0), 0.5)
+	shadow.ZIndex = 1
+	makeCorner(shadow, 18)
+
+	-- Header
+	local header = makeFrame(panel, UDim2.new(1,0,0,50), UDim2.new(0,0,0,0), Color3.fromRGB(0,80,160))
+	header.ZIndex = 3
+	makeCorner(header, 14)
+
+	-- Arredondamento só em cima
+	local headerFix = makeFrame(header, UDim2.new(1,0,0.5,0), UDim2.new(0,0,0.5,0), Color3.fromRGB(0,80,160))
+	headerFix.ZIndex = 3
+
+	-- Título
+	local titleLabel = makeLabel(header, title, UDim2.new(1,-50,1,0), UDim2.new(0,15,0,0), Enum.Font.GothamBold, 18, Color3.fromRGB(255,255,255))
+	titleLabel.ZIndex = 4
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	-- Botão X
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 32, 0, 32)
+	closeBtn.Position = UDim2.new(1, -42, 0, 9)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Text = "✕"
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 16
+	closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+	closeBtn.AutoButtonColor = false
+	closeBtn.ZIndex = 5
+	closeBtn.Parent = header
+	makeCorner(closeBtn, 8)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		tween(panel, {Size = UDim2.new(0, width, 0, 0), Position = UDim2.new(0.5, -width/2, 0.5, 0)}, 0.25)
+		wait(0.25)
+		gui:Destroy()
+	end)
+	overlay.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			tween(panel, {Size = UDim2.new(0, width, 0, 0), Position = UDim2.new(0.5, -width/2, 0.5, 0)}, 0.25)
+			wait(0.25)
+			gui:Destroy()
+		end
+	end)
+
+	-- Área de conteúdo
+	local content = makeFrame(panel, UDim2.new(1,-20,1,-60), UDim2.new(0,10,0,55), Color3.fromRGB(15,15,25))
+	content.ZIndex = 3
+
+	-- Animação de abertura
+	panel.Size = UDim2.new(0, width, 0, 0)
+	panel.Position = UDim2.new(0.5, -width/2, 0.5, 0)
+	tween(panel, {Size = UDim2.new(0, width, 0, height), Position = UDim2.new(0.5, -width/2, 0.5, -height/2)}, 0.3)
+
+	return gui, panel, content, closeBtn
+end
+
+-- ============================================================
+-- WEBHOOK DISCORD
+-- ============================================================
+
+local function sendWebhook(mensagem)
+	-- No servidor (via RemoteEvent para evitar exploits)
+	local webhookRemote = RemotesFolder:FindFirstChild("SendWebhook")
+	if webhookRemote then
+		pcall(function() webhookRemote:FireServer(mensagem) end)
+	end
+end
+
+-- ============================================================
+-- UI DE DINHEIRO (canto superior)
+-- ============================================================
+
+local function createMoneyUI()
+	local oldGui = PlayerGui:FindFirstChild("EB_MoneyUI")
+	if oldGui then oldGui:Destroy() end
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "EB_MoneyUI"
+	gui.ResetOnSpawn = false
+	gui.DisplayOrder = 5
+	gui.Parent = PlayerGui
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 140, 0, 36)
+	frame.Position = UDim2.new(0, 10, 0, 46) -- acima dos botões do Roblox
+	frame.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+	frame.BackgroundTransparency = 0.15
+	frame.BorderSizePixel = 0
+	frame.Parent = gui
+	makeCorner(frame, 10)
+	makeStroke(frame, Color3.fromRGB(0, 180, 80), 1.5)
+
+	-- Ícone
+	local icon = makeLabel(frame, "💰", UDim2.new(0, 30, 1, 0), UDim2.new(0, 5, 0, 0), Enum.Font.GothamBold, 18, Color3.fromRGB(255, 215, 0))
+
+	-- Valor
+	local moneyLabel = makeLabel(frame, "R$ 0", UDim2.new(1, -38, 1, 0), UDim2.new(0, 38, 0, 0), Enum.Font.GothamBold, 13, Color3.fromRGB(100, 255, 130))
+	moneyLabel.Name = "MoneyLabel"
+	moneyLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	return gui, moneyLabel
+end
+
+local moneyGui, moneyLabel = createMoneyUI()
+
+local function updateMoneyUI(amount)
+	if moneyLabel and moneyLabel.Parent then
+		-- Formata número
+		local formatted = tostring(amount):reverse():gsub("(%d%d%d)", "%1."):reverse():gsub("^%.", "")
+		moneyLabel.Text = "R$ " .. formatted
+	end
+end
+
+-- ============================================================
+-- PAINEL DE RECRUTAMENTO (Graduados)
+-- ============================================================
+
+local function openRecrutamento()
+	local gui, panel, content = makePanel("🎖️  Recrutamento Praças", 380, 260)
+
+	local info = makeLabel(content, "Nome do Recrutado", UDim2.new(1,0,0,20), UDim2.new(0,0,0,10), Enum.Font.GothamMedium, 13, Color3.fromRGB(180,180,200))
+	info.TextXAlignment = Enum.TextXAlignment.Left
+
+	local nameBox = makeTextBox(content, "Nome do player (ex: SwordGods)", UDim2.new(1,0,0,38), UDim2.new(0,0,0,32))
+
+	-- Status
+	local statusLabel = makeLabel(content, "", UDim2.new(1,0,0,20), UDim2.new(0,0,0,80), Enum.Font.Gotham, 12, Color3.fromRGB(255, 100, 100))
+
+	-- Botão Recrutar
+	local recrutarBtn = makeButton(content, "⚔️  Recrutar", UDim2.new(1,0,0,42), UDim2.new(0,0,0,108), Color3.fromRGB(0, 130, 60))
+	makeCorner(recrutarBtn, 10)
+
+	recrutarBtn.MouseButton1Click:Connect(function()
+		local nomeBuscado = nameBox.Text:match("^%s*(.-)%s*$")
+		if nomeBuscado == "" then
+			statusLabel.Text = "⚠️ Digite um nome!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+			return
+		end
+
+		-- Procura o jogador
+		local targetPlayer = nil
+		for _, p in pairs(Players:GetPlayers()) do
+			if p.Name:lower() == nomeBuscado:lower() or p.DisplayName:lower() == nomeBuscado:lower() then
+				targetPlayer = p
+				break
+			end
+		end
+
+		if not targetPlayer then
+			statusLabel.Text = "❌ Jogador não encontrado no servidor!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		-- Busca dados do alvo
+		local targetData = GetPlayerDataRemote:InvokeServer(targetPlayer.Name)
+
+		if not targetData then
+			statusLabel.Text = "❌ Não foi possível obter dados do jogador."
+			statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		if targetData.Patente ~= "Civil" then
+			statusLabel.Text = "⛔ Apenas Civis podem ser recrutados!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		-- Executa recrutamento
+		SetPatenteRemote:FireServer(targetPlayer, "Recruta", "[EB]")
+		statusLabel.Text = "✅ " .. targetPlayer.DisplayName .. " recrutado como Recruta!"
+		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+
+		sendWebhook(string.format(
+			"🪖 **RECRUTAMENTO** | **%s** foi recrutado como **Recruta** por **%s**",
+			targetPlayer.Name, LocalPlayer.Name
+		))
+	end)
+end
+
+-- ============================================================
+-- PAINEL DE PROMOÇÃO (Oficiais)
+-- ============================================================
+
+local function openPromocao(patentesDisponiveis)
+	local panelH = 100 + (#patentesDisponiveis * 36) + 130
+	panelH = math.clamp(panelH, 300, 580)
+
+	local gui, panel, content = makePanel("⭐  Promoção de Praças e Graduados", 420, panelH)
+
+	local info = makeLabel(content, "Nome do Jogador", UDim2.new(1,0,0,20), UDim2.new(0,0,0,10), Enum.Font.GothamMedium, 13, Color3.fromRGB(180,180,200))
+	info.TextXAlignment = Enum.TextXAlignment.Left
+
+	local nameBox = makeTextBox(content, "Nome do player", UDim2.new(1,0,0,36), UDim2.new(0,0,0,32))
+
+	-- Label de patentes
+	local pLabel = makeLabel(content, "Patentes Disponíveis para Promoção:", UDim2.new(1,0,0,20), UDim2.new(0,0,0,80), Enum.Font.GothamMedium, 13, Color3.fromRGB(200,200,220))
+	pLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	-- Scroll para patentes
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Size = UDim2.new(1, 0, 0, math.min(#patentesDisponiveis * 36, 200))
+	scroll.Position = UDim2.new(0, 0, 0, 100)
+	scroll.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 4
+	scroll.ScrollBarImageColor3 = Color3.fromRGB(0, 120, 212)
+	scroll.CanvasSize = UDim2.new(0, 0, 0, #patentesDisponiveis * 36)
+	scroll.Parent = content
+	makeCorner(scroll, 8)
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = scroll
+
+	local selectedPatente = nil
+	local patenteBtns = {}
+
+	for i, pat in ipairs(patentesDisponiveis) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, -8, 0, 32)
+		btn.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
+		btn.BorderSizePixel = 0
+		btn.Text = pat
+		btn.Font = Enum.Font.GothamMedium
+		btn.TextSize = 13
+		btn.TextColor3 = PATENTE_CORES[pat] or Color3.fromRGB(200, 200, 200)
+		btn.AutoButtonColor = false
+		btn.LayoutOrder = i
+		btn.Parent = scroll
+		makeCorner(btn, 6)
+
+		local leftBar = Instance.new("Frame")
+		leftBar.Size = UDim2.new(0, 4, 0, 20)
+		leftBar.Position = UDim2.new(0, 4, 0.5, -10)
+		leftBar.BackgroundColor3 = PATENTE_CORES[pat] or Color3.fromRGB(200,200,200)
+		leftBar.BorderSizePixel = 0
+		leftBar.Parent = btn
+		makeCorner(leftBar, 2)
+
+		patenteBtns[pat] = btn
+
+		btn.MouseButton1Click:Connect(function()
+			-- Deseleciona todos
+			for _, b in pairs(patenteBtns) do
+				tween(b, {BackgroundColor3 = Color3.fromRGB(28, 28, 42)}, 0.15)
+			end
+			selectedPatente = pat
+			tween(btn, {BackgroundColor3 = Color3.fromRGB(0, 80, 160)}, 0.15)
+		end)
+	end
+
+	local yBase = 100 + math.min(#patentesDisponiveis * 36, 200) + 10
+	local statusLabel = makeLabel(content, "", UDim2.new(1,0,0,20), UDim2.new(0,0,0,yBase), Enum.Font.Gotham, 12, Color3.fromRGB(255,100,100))
+
+	local aplicarBtn = makeButton(content, "✅  Aplicar Promoção", UDim2.new(1,0,0,42), UDim2.new(0,0,0,yBase+22), Color3.fromRGB(0, 120, 212))
+	makeCorner(aplicarBtn, 10)
+
+	aplicarBtn.MouseButton1Click:Connect(function()
+		if not selectedPatente then
+			statusLabel.Text = "⚠️ Selecione uma patente!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+			return
+		end
+		local nome = nameBox.Text:match("^%s*(.-)%s*$")
+		if nome == "" then
+			statusLabel.Text = "⚠️ Digite um nome!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+			return
+		end
+
+		local targetPlayer = nil
+		for _, p in pairs(Players:GetPlayers()) do
+			if p.Name:lower() == nome:lower() or p.DisplayName:lower() == nome:lower() then
+				targetPlayer = p
+				break
+			end
+		end
+
+		if not targetPlayer then
+			statusLabel.Text = "❌ Jogador não encontrado!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		local targetData = GetPlayerDataRemote:InvokeServer(targetPlayer.Name)
+		if not targetData then
+			statusLabel.Text = "❌ Erro ao obter dados."
+			statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		-- Civis não podem ser promovidos por oficiais (só recrutados)
+		if targetData.Team == "Civis [EB]" then
+			statusLabel.Text = "⛔ Civis devem ser recrutados primeiro!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		-- Divisão
+		local divisao = "[EB]"
+		SetPatenteRemote:FireServer(targetPlayer, selectedPatente, divisao)
+		statusLabel.Text = "✅ " .. targetPlayer.DisplayName .. " promovido para " .. selectedPatente .. "!"
+		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+
+		sendWebhook(string.format(
+			"⭐ **PROMOÇÃO** | **%s** foi promovido para **%s** por **%s**",
+			targetPlayer.Name, selectedPatente, LocalPlayer.Name
+		))
+	end)
+end
+
+-- ============================================================
+-- PAINEL DE TREINAMENTO (Oficiais)
+-- ============================================================
+
+local function openTreinamento()
+	local gui, panel, content = makePanel("🎯  Executar Treinamento", 420, 400)
+
+	local info = makeLabel(content, "Jogadores no Treinamento:", UDim2.new(1,0,0,20), UDim2.new(0,0,0,5), Enum.Font.GothamBold, 14, Color3.fromRGB(200,220,255))
+	info.TextXAlignment = Enum.TextXAlignment.Left
+
+	local sub = makeLabel(content, "Apenas membros de Praças ou Graduados", UDim2.new(1,0,0,18), UDim2.new(0,0,0,24), Enum.Font.Gotham, 11, Color3.fromRGB(140,140,160))
+	sub.TextXAlignment = Enum.TextXAlignment.Left
+
+	-- Lista de elegíveis
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Size = UDim2.new(1, 0, 0, 200)
+	scroll.Position = UDim2.new(0, 0, 0, 45)
+	scroll.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 4
+	scroll.ScrollBarImageColor3 = Color3.fromRGB(0, 120, 212)
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.Parent = content
+	makeCorner(scroll, 8)
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.SortOrder = Enum.SortOrder.Name
+	listLayout.Parent = scroll
+
+	local selectedPlayers = {}
+
+	local eligibleTeams = {["Praças [EB]"] = true, ["Graduados [EB]"] = true}
+	local eligibleCount = 0
+
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Team and eligibleTeams[p.Team.Name] then
+			eligibleCount = eligibleCount + 1
+			local btn = Instance.new("TextButton")
+			btn.Size = UDim2.new(1, -4, 0, 32)
+			btn.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
+			btn.BorderSizePixel = 0
+			btn.Text = "  " .. p.DisplayName .. "  [" .. (p.Team and p.Team.Name or "?") .. "]"
+			btn.Font = Enum.Font.Gotham
+			btn.TextSize = 13
+			btn.TextColor3 = Color3.fromRGB(200, 220, 255)
+			btn.TextXAlignment = Enum.TextXAlignment.Left
+			btn.AutoButtonColor = false
+			btn.Parent = scroll
+			makeCorner(btn, 5)
+
+			local selected = false
+			btn.MouseButton1Click:Connect(function()
+				selected = not selected
+				if selected then
+					selectedPlayers[p.UserId] = p
+					tween(btn, {BackgroundColor3 = Color3.fromRGB(0, 80, 50)}, 0.15)
+					btn.TextColor3 = Color3.fromRGB(100, 255, 150)
+				else
+					selectedPlayers[p.UserId] = nil
+					tween(btn, {BackgroundColor3 = Color3.fromRGB(25, 25, 38)}, 0.15)
+					btn.TextColor3 = Color3.fromRGB(200, 220, 255)
+				end
+			end)
+		end
+	end
+
+	scroll.CanvasSize = UDim2.new(0, 0, 0, eligibleCount * 36)
+
+	if eligibleCount == 0 then
+		local emptyLabel = makeLabel(scroll, "Nenhum membro elegível online.", UDim2.new(1,0,0,30), UDim2.new(0,0,0,10), Enum.Font.Gotham, 13, Color3.fromRGB(140,140,160))
+	end
+
+	local statusLabel = makeLabel(content, "", UDim2.new(1,0,0,20), UDim2.new(0,0,0,255), Enum.Font.Gotham, 12, Color3.fromRGB(255,100,100))
+
+	local iniciarBtn = makeButton(content, "🚀  Iniciar Treinamento (Teleportar)", UDim2.new(1,0,0,42), UDim2.new(0,0,0,278), Color3.fromRGB(0, 130, 180))
+	makeCorner(iniciarBtn, 10)
+
+	iniciarBtn.MouseButton1Click:Connect(function()
+		local count = 0
+		for uid, p in pairs(selectedPlayers) do
+			count = count + 1
+		end
+		if count == 0 then
+			statusLabel.Text = "⚠️ Selecione ao menos 1 jogador!"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+			return
+		end
+
+		-- Teleporta jogadores para o oficial
+		local myChar = LocalPlayer.Character
+		local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		if not myHRP then
+			statusLabel.Text = "❌ Não foi possível obter sua posição."
+			return
+		end
+
+		local teleportRemote = RemotesFolder:FindFirstChild("TeleportToPlayer")
+		if teleportRemote then
+			for uid, p in pairs(selectedPlayers) do
+				teleportRemote:FireServer(p, LocalPlayer)
+			end
+		end
+
+		statusLabel.Text = "✅ Treinamento iniciado com " .. count .. " soldado(s)!"
+		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+	end)
+end
+
+-- ============================================================
+-- PAINEL DE ADMINISTRAÇÃO
+-- ============================================================
+
+local function openAdminPanel()
+	local gui, panel, content = makePanel("🔨  Painel de Administração", 500, 560)
+
+	-- Tabs
+	local tabNames = {"👤 Jogadores", "🏆 Patentes", "💰 Dinheiro", "🔨 Punições"}
+	local tabY = 0
+	local tabBtns = {}
+	local tabContents = {}
+
+	local tabBar = makeFrame(content, UDim2.new(1,0,0,38), UDim2.new(0,0,0,0), Color3.fromRGB(20,20,32))
+	makeCorner(tabBar, 8)
+
+	local tabLayout = Instance.new("UIListLayout")
+	tabLayout.FillDirection = Enum.FillDirection.Horizontal
+	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	tabLayout.Parent = tabBar
+
+	local tabArea = makeFrame(content, UDim2.new(1,0,1,-48), UDim2.new(0,0,0,44), Color3.fromRGB(18,18,28))
+	makeCorner(tabArea, 8)
+
+	local function showTab(idx)
+		for i, tc in ipairs(tabContents) do
+			tc.Visible = (i == idx)
+		end
+		for i, tb in ipairs(tabBtns) do
+			tween(tb, {BackgroundColor3 = i == idx and Color3.fromRGB(0,100,200) or Color3.fromRGB(28,28,42)}, 0.2)
+		end
+	end
+
+	for i, tName in ipairs(tabNames) do
+		local tb = Instance.new("TextButton")
+		tb.Size = UDim2.new(0, 110, 0, 34)
+		tb.BackgroundColor3 = i == 1 and Color3.fromRGB(0,100,200) or Color3.fromRGB(28,28,42)
+		tb.BorderSizePixel = 0
+		tb.Text = tName
+		tb.Font = Enum.Font.GothamMedium
+		tb.TextSize = 12
+		tb.TextColor3 = Color3.fromRGB(220,220,255)
+		tb.AutoButtonColor = false
+		tb.LayoutOrder = i
+		tb.Parent = tabBar
+		makeCorner(tb, 6)
+		tabBtns[i] = tb
+
+		local tc = makeFrame(tabArea, UDim2.new(1,-10,1,-10), UDim2.new(0,5,0,5), Color3.fromRGB(18,18,28))
+		tc.Visible = (i == 1)
+		tabContents[i] = tc
+
+		tb.MouseButton1Click:Connect(function() showTab(i) end)
+	end
+
+	-- == Tab 1: Jogadores (lista e info) ==
+	local tab1 = tabContents[1]
+	local playerScroll = Instance.new("ScrollingFrame")
+	playerScroll.Size = UDim2.new(1,0,1,0)
+	playerScroll.BackgroundTransparency = 1
+	playerScroll.BorderSizePixel = 0
+	playerScroll.ScrollBarThickness = 4
+	playerScroll.ScrollBarImageColor3 = Color3.fromRGB(0,120,212)
+	playerScroll.CanvasSize = UDim2.new(0,0,0,0)
+	playerScroll.Parent = tab1
+
+	local pl = Instance.new("UIListLayout")
+	pl.SortOrder = Enum.SortOrder.Name
+	pl.Padding = UDim.new(0,4)
+	pl.Parent = playerScroll
+
+	local function refreshPlayerList()
+		for _, c in pairs(playerScroll:GetChildren()) do
+			if c:IsA("Frame") then c:Destroy() end
+		end
+		local count = 0
+		for _, p in pairs(Players:GetPlayers()) do
+			count = count + 1
+			local row = makeFrame(playerScroll, UDim2.new(1,-4,0,40), UDim2.new(0,2,0,0), Color3.fromRGB(25,25,38))
+			row.LayoutOrder = count
+			makeCorner(row, 6)
+			makeLabel(row, p.DisplayName, UDim2.new(0.5,0,0.5,0), UDim2.new(0,8,0,-10), Enum.Font.GothamBold, 13, Color3.fromRGB(220,220,255), Enum.TextXAlignment.Left)
+
+			local data = GetPlayerDataRemote:InvokeServer(p.Name)
+			local patente = data and data.Patente or "?"
+			local divisao = data and data.Divisao or "?"
+			makeLabel(row, patente .. " | " .. divisao, UDim2.new(0.5,0,0.5,0), UDim2.new(0,8,0,10), Enum.Font.Gotham, 11, PATENTE_CORES[patente] or Color3.fromRGB(180,180,200), Enum.TextXAlignment.Left)
+		end
+		playerScroll.CanvasSize = UDim2.new(0,0,0, count * 48)
+	end
+	refreshPlayerList()
+
+	-- == Tab 2: Setagem de Patente (Admin) ==
+	local tab2 = tabContents[2]
+	local t2_nameBox = makeTextBox(tab2, "Nome do jogador", UDim2.new(1,0,0,36), UDim2.new(0,0,0,0))
+
+	local allPatentes = {
+		"Civil","Recruta","Soldado","Cabo",
+		"Terceiro Sargento","Segundo Sargento","Primeiro Sargento","Subtenente",
+		"Segundo Tenente","Primeiro Tenente","Capitao",
+		"Major","Tenente Coronel","Coronel","Marechal"
+	}
+
+	local t2_pScroll = Instance.new("ScrollingFrame")
+	t2_pScroll.Size = UDim2.new(1,0,1,-130)
+	t2_pScroll.Position = UDim2.new(0,0,0,44)
+	t2_pScroll.BackgroundColor3 = Color3.fromRGB(20,20,32)
+	t2_pScroll.BorderSizePixel = 0
+	t2_pScroll.ScrollBarThickness = 4
+	t2_pScroll.CanvasSize = UDim2.new(0,0,0, #allPatentes * 34)
+	t2_pScroll.Parent = tab2
+	makeCorner(t2_pScroll, 6)
+
+	local t2_ll = Instance.new("UIListLayout")
+	t2_ll.SortOrder = Enum.SortOrder.LayoutOrder
+	t2_ll.Padding = UDim.new(0,2)
+	t2_ll.Parent = t2_pScroll
+
+	local t2_selected = nil
+	local t2_btns = {}
+
+	for i, pat in ipairs(allPatentes) do
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.new(1,-4,0,30)
+		b.BackgroundColor3 = Color3.fromRGB(25,25,38)
+		b.BorderSizePixel = 0
+		b.Text = "  " .. pat
+		b.Font = Enum.Font.Gotham
+		b.TextSize = 13
+		b.TextColor3 = PATENTE_CORES[pat] or Color3.fromRGB(200,200,200)
+		b.TextXAlignment = Enum.TextXAlignment.Left
+		b.AutoButtonColor = false
+		b.LayoutOrder = i
+		b.Parent = t2_pScroll
+		makeCorner(b, 4)
+		t2_btns[pat] = b
+
+		b.MouseButton1Click:Connect(function()
+			t2_selected = pat
+			for _, bb in pairs(t2_btns) do
+				tween(bb, {BackgroundColor3 = Color3.fromRGB(25,25,38)}, 0.12)
+			end
+			tween(b, {BackgroundColor3 = Color3.fromRGB(0,70,140)}, 0.12)
+		end)
+	end
+
+	local t2_status = makeLabel(tab2, "", UDim2.new(1,0,0,20), UDim2.new(0,0,1,-65), Enum.Font.Gotham, 12, Color3.fromRGB(255,100,100))
+	local t2_apply = makeButton(tab2, "✅ Aplicar Patente", UDim2.new(1,0,0,38), UDim2.new(0,0,1,-42), Color3.fromRGB(0,120,212))
+	makeCorner(t2_apply, 8)
+
+	t2_apply.MouseButton1Click:Connect(function()
+		if not t2_selected then
+			t2_status.Text = "⚠️ Selecione uma patente!"
+			t2_status.TextColor3 = Color3.fromRGB(255,200,0)
+			return
+		end
+		local nome = t2_nameBox.Text:match("^%s*(.-)%s*$")
+		if nome == "" then
+			t2_status.Text = "⚠️ Digite um nome!"
+			t2_status.TextColor3 = Color3.fromRGB(255,200,0)
+			return
+		end
+		local tp = nil
+		for _, p in pairs(Players:GetPlayers()) do
+			if p.Name:lower() == nome:lower() then tp = p break end
+		end
+		if not tp then
+			t2_status.Text = "❌ Jogador não encontrado!"
+			t2_status.TextColor3 = Color3.fromRGB(255,80,80)
+			return
+		end
+		local adminRemote = RemotesFolder:FindFirstChild("AdminSetPatente")
+		if adminRemote then
+			adminRemote:FireServer(tp, t2_selected)
+		else
+			SetPatenteRemote:FireServer(tp, t2_selected, "[EB]")
+		end
+		t2_status.Text = "✅ Patente de " .. tp.DisplayName .. " definida: " .. t2_selected
+		t2_status.TextColor3 = Color3.fromRGB(100,255,100)
+	end)
+
+	-- == Tab 3: Dinheiro ==
+	local tab3 = tabContents[3]
+	local t3_nameBox = makeTextBox(tab3, "Nome do jogador", UDim2.new(1,0,0,36), UDim2.new(0,0,0,0))
+	local t3_amtBox = makeTextBox(tab3, "Valor (ex: 50000)", UDim2.new(1,0,0,36), UDim2.new(0,0,0,42))
+	local t3_status = makeLabel(tab3, "", UDim2.new(1,0,0,20), UDim2.new(0,0,0,85), Enum.Font.Gotham, 12, Color3.fromRGB(255,100,100))
+
+	local t3_set = makeButton(tab3, "💰 Definir Dinheiro", UDim2.new(1,0,0,38), UDim2.new(0,0,0,108), Color3.fromRGB(180,140,0))
+	makeCorner(t3_set, 8)
+	local t3_add = makeButton(tab3, "➕ Adicionar Dinheiro", UDim2.new(1,0,0,38), UDim2.new(0,0,0,152), Color3.fromRGB(0,140,60))
+	makeCorner(t3_add, 8)
+	local t3_reset = makeButton(tab3, "🔁 Resetar Dinheiro (0)", UDim2.new(1,0,0,38), UDim2.new(0,0,0,196), Color3.fromRGB(160,40,40))
+	makeCorner(t3_reset, 8)
+
+	local function getT3Values()
+		local nome = t3_nameBox.Text:match("^%s*(.-)%s*$")
+		local amt = tonumber(t3_amtBox.Text) or 0
+		local tp = nil
+		for _, p in pairs(Players:GetPlayers()) do
+			if p.Name:lower() == nome:lower() then tp = p break end
+		end
+		return tp, amt, nome
+	end
+
+	t3_set.MouseButton1Click:Connect(function()
+		local tp, amt, nome = getT3Values()
+		if not tp then t3_status.Text = "❌ Jogador '" .. nome .. "' não encontrado!"; t3_status.TextColor3 = Color3.fromRGB(255,80,80); return end
+		SetDinheiroRemote:FireServer(tp, amt)
+		t3_status.Text = "✅ Dinheiro de " .. tp.DisplayName .. " definido: R$" .. amt
+		t3_status.TextColor3 = Color3.fromRGB(100,255,100)
+	end)
+	t3_add.MouseButton1Click:Connect(function()
+		local tp, amt = getT3Values()
+		if not tp then t3_status.Text = "❌ Jogador não encontrado!"; t3_status.TextColor3 = Color3.fromRGB(255,80,80); return end
+		local data = GetPlayerDataRemote:InvokeServer(tp.Name)
+		local newAmt = (data and data.Dinheiro or 0) + amt
+		SetDinheiroRemote:FireServer(tp, newAmt)
+		t3_status.Text = "✅ +R$" .. amt .. " para " .. tp.DisplayName
+		t3_status.TextColor3 = Color3.fromRGB(100,255,100)
+	end)
+	t3_reset.MouseButton1Click:Connect(function()
+		local tp = getT3Values()
+		if not tp then t3_status.Text = "❌ Jogador não encontrado!"; t3_status.TextColor3 = Color3.fromRGB(255,80,80); return end
+		SetDinheiroRemote:FireServer(tp, 0)
+		t3_status.Text = "✅ Dinheiro de " .. tp.DisplayName .. " zerado."
+		t3_status.TextColor3 = Color3.fromRGB(100,255,100)
+	end)
+
+	-- == Tab 4: Punições ==
+	local tab4 = tabContents[4]
+	local t4_nameBox = makeTextBox(tab4, "Nome do jogador", UDim2.new(1,0,0,36), UDim2.new(0,0,0,0))
+	local t4_reasonBox = makeTextBox(tab4, "Motivo (ban/kick)", UDim2.new(1,0,0,36), UDim2.new(0,0,0,42))
+	local t4_status = makeLabel(tab4, "", UDim2.new(1,0,0,20), UDim2.new(0,0,0,85), Enum.Font.Gotham, 12, Color3.fromRGB(255,100,100))
+
+	local t4_kick = makeButton(tab4, "👢 Kickar Jogador", UDim2.new(1,0,0,38), UDim2.new(0,0,0,108), Color3.fromRGB(160,80,0))
+	makeCorner(t4_kick, 8)
+	local t4_ban = makeButton(tab4, "🔨 Banir Jogador (+ Alts)", UDim2.new(1,0,0,38), UDim2.new(0,0,0,152), Color3.fromRGB(160,20,20))
+	makeCorner(t4_ban, 8)
+
+	local punishRemote = RemotesFolder:FindFirstChild("AdminPunish")
+
+	t4_kick.MouseButton1Click:Connect(function()
+		local nome = t4_nameBox.Text:match("^%s*(.-)%s*$")
+		local motivo = t4_reasonBox.Text:match("^%s*(.-)%s*$")
+		if nome == "" then t4_status.Text = "⚠️ Digite um nome!"; t4_status.TextColor3 = Color3.fromRGB(255,200,0); return end
+		if punishRemote then
+			punishRemote:FireServer("kick", nome, motivo)
+			t4_status.Text = "✅ Kick enviado para " .. nome
+			t4_status.TextColor3 = Color3.fromRGB(100,255,100)
+		end
+	end)
+
+	t4_ban.MouseButton1Click:Connect(function()
+		local nome = t4_nameBox.Text:match("^%s*(.-)%s*$")
+		local motivo = t4_reasonBox.Text:match("^%s*(.-)%s*$")
+		-- Verifica se é unbannable
+		for _, uname in pairs(UNBANNABLES) do
+			if uname:lower() == nome:lower() then
+				t4_status.Text = "⛔ Esse jogador não pode ser banido!"
+				t4_status.TextColor3 = Color3.fromRGB(255, 80, 80)
+				return
+			end
+		end
+		if punishRemote then
+			punishRemote:FireServer("ban", nome, motivo)
+			t4_status.Text = "✅ Ban enviado para " .. nome
+			t4_status.TextColor3 = Color3.fromRGB(100,255,100)
+		end
+	end)
+end
+
+-- ============================================================
+-- PAINEL DE DESENVOLVEDOR
+-- ============================================================
+
+local function openDevPanel()
+	local gui, panel, content = makePanel("🖥️  Painel de Desenvolvedor", 540, 600)
+
+	local tabNames = {"⚙️ Config", "🔧 Remotes", "💻 Executar Script", "📊 Stats do Server"}
+	local tabBtns = {}
+	local tabContents = {}
+
+	local tabBar = makeFrame(content, UDim2.new(1,0,0,38), UDim2.new(0,0,0,0), Color3.fromRGB(20,20,32))
+	makeCorner(tabBar, 8)
+
+	local tabLayout = Instance.new("UIListLayout")
+	tabLayout.FillDirection = Enum.FillDirection.Horizontal
+	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	tabLayout.Parent = tabBar
+
+	local tabArea = makeFrame(content, UDim2.new(1,0,1,-48), UDim2.new(0,0,0,44), Color3.fromRGB(18,18,28))
+	makeCorner(tabArea, 8)
+
+	local function showTab(idx)
+		for i, tc in ipairs(tabContents) do tc.Visible = (i == idx) end
+		for i, tb in ipairs(tabBtns) do
+			tween(tb, {BackgroundColor3 = i == idx and Color3.fromRGB(80,0,160) or Color3.fromRGB(28,28,42)}, 0.2)
+		end
+	end
+
+	for i, tName in ipairs(tabNames) do
+		local tb = Instance.new("TextButton")
+		tb.Size = UDim2.new(0, 120, 0, 34)
+		tb.BackgroundColor3 = i == 1 and Color3.fromRGB(80,0,160) or Color3.fromRGB(28,28,42)
+		tb.BorderSizePixel = 0
+		tb.Text = tName
+		tb.Font = Enum.Font.GothamMedium
+		tb.TextSize = 11
+		tb.TextColor3 = Color3.fromRGB(220,200,255)
+		tb.AutoButtonColor = false
+		tb.LayoutOrder = i
+		tb.Parent = tabBar
+		makeCorner(tb, 6)
+		tabBtns[i] = tb
+
+		local tc = makeFrame(tabArea, UDim2.new(1,-10,1,-10), UDim2.new(0,5,0,5), Color3.fromRGB(18,18,28))
+		tc.Visible = (i == 1)
+		tabContents[i] = tc
+
+		tb.MouseButton1Click:Connect(function() showTab(i) end)
+	end
+
+	-- Tab 1: Config
+	local t1 = tabContents[1]
+	makeLabel(t1, "🛠️  Configurações do Sistema EB", UDim2.new(1,0,0,22), UDim2.new(0,0,0,0), Enum.Font.GothamBold, 15, Color3.fromRGB(200,180,255))
+
+	local configItems = {
+		{label = "Versão do Sistema", value = "v1.0"},
+		{label = "Servidores online", value = "1"},
+		{label = "Players no servidor", value = tostring(#Players:GetPlayers())},
+		{label = "Anti-Cheat", value = "✅ Ativo"},
+		{label = "DataStore", value = "✅ Ativo"},
+		{label = "Webhook EB", value = "✅ Configurado"},
+	}
+
+	for i, cfg in ipairs(configItems) do
+		local row = makeFrame(t1, UDim2.new(1,0,0,28), UDim2.new(0,0,0, 25 + (i-1)*32), Color3.fromRGB(22,22,35))
+		makeCorner(row, 5)
+		makeLabel(row, cfg.label, UDim2.new(0.6,0,1,0), UDim2.new(0,8,0,0), Enum.Font.Gotham, 12, Color3.fromRGB(180,180,200), Enum.TextXAlignment.Left)
+		makeLabel(row, cfg.value, UDim2.new(0.4,0,1,0), UDim2.new(0.6,0,0,0), Enum.Font.GothamMedium, 12, Color3.fromRGB(100,220,255), Enum.TextXAlignment.Right)
+	end
+
+	-- Tab 2: Remotes
+	local t2 = tabContents[2]
+	makeLabel(t2, "🔧  Remotes Registrados", UDim2.new(1,0,0,22), UDim2.new(0,0,0,0), Enum.Font.GothamBold, 15, Color3.fromRGB(200,180,255))
+
+	local remScroll = Instance.new("ScrollingFrame")
+	remScroll.Size = UDim2.new(1,0,1,-28)
+	remScroll.Position = UDim2.new(0,0,0,24)
+	remScroll.BackgroundTransparency = 1
+	remScroll.BorderSizePixel = 0
+	remScroll.ScrollBarThickness = 4
+	remScroll.Parent = t2
+
+	local remList = Instance.new("UIListLayout")
+	remList.SortOrder = Enum.SortOrder.Name
+	remList.Padding = UDim.new(0,2)
+	remList.Parent = remScroll
+
+	local remCount = 0
+	for _, rem in pairs(RemotesFolder:GetChildren()) do
+		remCount = remCount + 1
+		local row = makeFrame(remScroll, UDim2.new(1,-2,0,26), UDim2.new(0,1,0,0), Color3.fromRGB(22,22,35))
+		makeCorner(row, 4)
+		local icon = rem:IsA("RemoteEvent") and "📡" or "🔄"
+		makeLabel(row, icon .. "  " .. rem.Name, UDim2.new(0.7,0,1,0), UDim2.new(0,6,0,0), Enum.Font.Gotham, 12, Color3.fromRGB(180,200,255), Enum.TextXAlignment.Left)
+		makeLabel(row, rem.ClassName, UDim2.new(0.3,0,1,0), UDim2.new(0.7,0,0,0), Enum.Font.Gotham, 11, Color3.fromRGB(120,120,160), Enum.TextXAlignment.Right)
+	end
+	remScroll.CanvasSize = UDim2.new(0,0,0, remCount * 30)
+
+	-- Tab 3: Executar Script
+	local t3 = tabContents[3]
+	makeLabel(t3, "💻  Executar Script Serverside", UDim2.new(1,0,0,22), UDim2.new(0,0,0,0), Enum.Font.GothamBold, 15, Color3.fromRGB(200,180,255))
+	makeLabel(t3, "Requer: require(), loadstring() ou URL", UDim2.new(1,0,0,18), UDim2.new(0,0,0,22), Enum.Font.Gotham, 11, Color3.fromRGB(140,140,160))
+
+	local codeBox = Instance.new("TextBox")
+	codeBox.Size = UDim2.new(1,0,0,180)
+	codeBox.Position = UDim2.new(0,0,0,44)
+	codeBox.BackgroundColor3 = Color3.fromRGB(10,10,20)
+	codeBox.BorderSizePixel = 0
+	codeBox.Text = ""
+	codeBox.PlaceholderText = "-- Cole seu código aqui\nrequire(MODULE_ID)\n-- ou\nloadstring(game:HttpGet('URL'))()"
+	codeBox.PlaceholderColor3 = Color3.fromRGB(100,100,130)
+	codeBox.Font = Enum.Font.Code
+	codeBox.TextSize = 12
+	codeBox.TextColor3 = Color3.fromRGB(180,220,255)
+	codeBox.TextXAlignment = Enum.TextXAlignment.Left
+	codeBox.TextYAlignment = Enum.TextYAlignment.Top
+	codeBox.MultiLine = true
+	codeBox.ClearTextOnFocus = false
+	codeBox.Parent = t3
+	makeCorner(codeBox, 6)
+	makeStroke(codeBox, Color3.fromRGB(80,0,160), 1.5)
+	local cp = Instance.new("UIPadding"); cp.PaddingLeft = UDim.new(0,8); cp.PaddingTop = UDim.new(0,6); cp.Parent = codeBox
+
+	local execStatus = makeLabel(t3, "", UDim2.new(1,0,0,18), UDim2.new(0,0,0,230), Enum.Font.Gotham, 11, Color3.fromRGB(255,100,100))
+	local execBtn = makeButton(t3, "▶️  Executar no Servidor", UDim2.new(1,0,0,38), UDim2.new(0,0,0,252), Color3.fromRGB(80,0,160))
+	makeCorner(execBtn, 8)
+
+	execBtn.MouseButton1Click:Connect(function()
+		local code = codeBox.Text
+		if code == "" then
+			execStatus.Text = "⚠️ Código vazio!"
+			execStatus.TextColor3 = Color3.fromRGB(255,200,0)
+			return
+		end
+		local execRemote = RemotesFolder:FindFirstChild("DevExecute")
+		if execRemote then
+			execRemote:FireServer(code)
+			execStatus.Text = "✅ Enviado para execução serverside."
+			execStatus.TextColor3 = Color3.fromRGB(100,255,100)
+		else
+			execStatus.Text = "❌ Remote DevExecute não encontrada!"
+			execStatus.TextColor3 = Color3.fromRGB(255,80,80)
+		end
+	end)
+
+	-- Tab 4: Stats
+	local t4 = tabContents[4]
+	makeLabel(t4, "📊  Stats do Servidor", UDim2.new(1,0,0,22), UDim2.new(0,0,0,0), Enum.Font.GothamBold, 15, Color3.fromRGB(200,180,255))
+
+	local statsData = {
+		{"👥 Players Online", tostring(#Players:GetPlayers()) .. "/" .. tostring(Players.MaxPlayers)},
+		{"🕐 Uptime", "Calculando..."},
+		{"🖥️ Workspace Parts", tostring(#workspace:GetDescendants())},
+		{"📡 Remotes Ativas", tostring(#RemotesFolder:GetChildren())},
+	}
+
+	for i, s in ipairs(statsData) do
+		local row = makeFrame(t4, UDim2.new(1,0,0,34), UDim2.new(0,0,0, 25 + (i-1)*38), Color3.fromRGB(22,22,35))
+		makeCorner(row, 6)
+		makeLabel(row, s[1], UDim2.new(0.6,-4,1,0), UDim2.new(0,10,0,0), Enum.Font.GothamMedium, 13, Color3.fromRGB(180,180,220), Enum.TextXAlignment.Left)
+		local valLabel = makeLabel(row, s[2], UDim2.new(0.4,0,1,0), UDim2.new(0.6,-4,0,0), Enum.Font.GothamBold, 13, Color3.fromRGB(100,220,255), Enum.TextXAlignment.Right)
+	end
+end
+
+-- ============================================================
+-- BOTÕES FLUTUANTES (baseados no time do jogador)
+-- ============================================================
+
+local buttonsGui = Instance.new("ScreenGui")
+buttonsGui.Name = "EB_Buttons"
+buttonsGui.ResetOnSpawn = false
+buttonsGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+buttonsGui.Parent = PlayerGui
+
+local buttonsContainer = Instance.new("Frame")
+buttonsContainer.Name = "ButtonsContainer"
+buttonsContainer.Size = UDim2.new(0, 60, 0, 400)
+buttonsContainer.Position = UDim2.new(1, -70, 0.5, -200)
+buttonsContainer.BackgroundTransparency = 1
+buttonsContainer.BorderSizePixel = 0
+buttonsContainer.Parent = buttonsGui
+
+local function rebuildButtons(teamName)
+	-- Limpa botões antigos
+	for _, c in pairs(buttonsContainer:GetChildren()) do
+		if c:IsA("TextButton") then c:Destroy() end
+	end
+
+	local yOffset = 0
+	local isDev = false
+	for _, devName in pairs(DEVELOPERS) do
+		if LocalPlayer.Name == devName then isDev = true break end
+	end
+
+	local isAdmin = false
+	-- Admins: verificados via lista do GitHub (simplificado: inclui devs)
+	if isDev then isAdmin = true end
+
+	local isHonra = (teamName == "Honra [EB]")
+	local isOficialSup = (teamName == "Oficiais Superiores [EB]") or isHonra
+	local isOficial = (teamName == "Oficiais [EB]") or isOficialSup
+	local isGraduado = (teamName == "Graduados [EB]") or isOficial
+
+	-- Botão Desenvolvedores (acima de tudo)
+	if isDev then
+		local devBtn = makeSideButton("🖥️", Color3.fromRGB(60, 0, 120), yOffset, buttonsContainer)
+		devBtn.MouseButton1Click:Connect(openDevPanel)
+		yOffset = yOffset + 58
+	end
+
+	-- Botão Admin
+	if isAdmin then
+		local adminBtn = makeSideButton("🔨", Color3.fromRGB(120, 30, 0), yOffset, buttonsContainer)
+		adminBtn.MouseButton1Click:Connect(openAdminPanel)
+		yOffset = yOffset + 58
+	end
+
+	-- Botão Oficiais Superiores / Honra: mais patentes
+	if isOficialSup then
+		local supBtn = makeSideButton("⭐", Color3.fromRGB(0, 40, 160), yOffset, buttonsContainer)
+		supBtn.MouseButton1Click:Connect(function()
+			local patentes = isHonra and PATENTES_HONRA or PATENTES_OFICIAIS_SUP
+			openPromocao(patentes)
+		end)
+		yOffset = yOffset + 58
+	end
+
+	-- Botão Oficiais: promoção
+	if isOficial and not isOficialSup then
+		local ofBtn = makeSideButton("⭐", Color3.fromRGB(140, 20, 20), yOffset, buttonsContainer)
+		ofBtn.MouseButton1Click:Connect(function()
+			openPromocao(PATENTES_OFICIAIS)
+		end)
+		yOffset = yOffset + 58
+	end
+
+	-- Botão treinamento (oficiais+)
+	if isOficial then
+		local trainBtn = makeSideButton("🎯", Color3.fromRGB(0, 80, 80), yOffset, buttonsContainer)
+		trainBtn.MouseButton1Click:Connect(openTreinamento)
+		yOffset = yOffset + 58
+	end
+
+	-- Botão Graduados: recrutamento
+	if isGraduado then
+		local gradBtn = makeSideButton("🎖️", Color3.fromRGB(0, 80, 30), yOffset, buttonsContainer)
+		gradBtn.MouseButton1Click:Connect(openRecrutamento)
+		yOffset = yOffset + 58
+	end
+end
+
+-- Atualiza quando o time muda
+local function onTeamChanged()
+	local team = LocalPlayer.Team
+	rebuildButtons(team and team.Name or "Civis [EB]")
+end
+
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(onTeamChanged)
+onTeamChanged()
+
+-- ============================================================
+-- UPDATE UI DO SERVIDOR
+-- ============================================================
+
+UpdateUIRemote.OnClientEvent:Connect(function(data)
+	if not data then return end
+	if data.Dinheiro ~= nil then
+		localPlayerData.Dinheiro = data.Dinheiro
+		updateMoneyUI(data.Dinheiro)
+	end
+	if data.Patente then localPlayerData.Patente = data.Patente end
+	if data.Divisao then localPlayerData.Divisao = data.Divisao end
+	if data.Team then
+		localPlayerData.Team = data.Team
+	end
+end)
+
+print("[EB] definitionconfigs carregado com sucesso!")
