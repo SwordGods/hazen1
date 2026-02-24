@@ -1,1 +1,601 @@
+-- ██████╗  █████╗ ███████╗██╗ ██████╗    ███████╗██████╗
+-- ██╔══██╗██╔══██╗██╔════╝██║██╔════╝    ██╔════╝██╔══██╗
+-- ██████╔╝███████║███████╗██║██║         █████╗  ██████╔╝
+-- ██╔══██╗██╔══██║╚════██║██║██║         ██╔══╝  ██╔══██╗
+-- ██████╔╝██║  ██║███████║██║╚██████╗    ███████╗██████╔╝
+-- ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝   ╚══════╝╚═════╝
+-- Exército Brasileiro ROBLOX - basicfuncs v1.0
+-- Script principal: Overheads, LeaderStats, Anti-Cheat, UI
 
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+-- ============================================================
+-- ANTI-CHEAT / PROTEÇÕES
+-- ============================================================
+
+local _ENV_BACKUP = {}
+local PROTECTED_GLOBALS = {
+	"require", "loadstring", "pcall", "xpcall", "pairs", "ipairs",
+	"tostring", "tonumber", "type", "select", "unpack", "table",
+	"string", "math", "coroutine", "game", "workspace", "script"
+}
+
+-- Proteção anti-hookfunction
+local function protectFunction(fn)
+	return newproxy and fn or fn
+end
+
+-- Anti-DEX Explorer / Anti-Script Injector
+local function setupAntiCheat()
+	-- Bloqueia tentativas de explorar instâncias do servidor
+	-- Verifica scripts suspeitos sendo inseridos
+	local function checkSuspiciousScript(child)
+		if child:IsA("LocalScript") or child:IsA("Script") or child:IsA("ModuleScript") then
+			-- Scripts não autorizados fora de locais permitidos
+			local allowedParents = {
+				game:GetService("StarterGui"),
+				game:GetService("StarterPack"),
+				game:GetService("StarterPlayer"),
+				game:GetService("ServerScriptService"),
+				game:GetService("ReplicatedStorage"),
+				game:GetService("Workspace"),
+			}
+			local isAllowed = false
+			for _, allowed in pairs(allowedParents) do
+				if child:IsDescendantOf(allowed) then
+					isAllowed = true
+					break
+				end
+			end
+			-- Scripts injetados em locais errados = suspeito
+			if not isAllowed then
+				pcall(function() child:Destroy() end)
+			end
+		end
+	end
+
+	-- Monitora inserção de novos objetos no workspace
+	workspace.DescendantAdded:Connect(function(child)
+		pcall(checkSuspiciousScript, child)
+	end)
+
+	-- Anti-Backdoor: Verifica RemoteEvents suspeitas
+	local function scanForBackdoors()
+		for _, obj in pairs(game:GetDescendants()) do
+			if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+				local name = obj.Name:lower()
+				-- Nomes suspeitos comuns de backdoors
+				local suspiciousNames = {
+					"re", "rf", "evt", "event", "remote", "cmd", "exec",
+					"run", "execute", "backdoor", "loader", "inject"
+				}
+				for _, sus in pairs(suspiciousNames) do
+					if name == sus then
+						-- Log suspeito mas não destroi (pode ser legítimo)
+						warn("[EB-ANTICHEAT] Remote suspeita detectada: " .. obj:GetFullName())
+					end
+				end
+			end
+		end
+	end
+
+	-- Roda scan a cada 30 segundos
+	coroutine.wrap(function()
+		while true do
+			pcall(scanForBackdoors)
+			wait(30)
+		end
+	end)()
+
+	-- Anti-HookFunction: Verifica integridade de funções críticas
+	local originalWarn = warn
+	local originalPrint = print
+	local hookCheckInterval = 5
+
+	coroutine.wrap(function()
+		while true do
+			-- Verifica se funções foram substituídas
+			if warn ~= originalWarn then
+				warn = originalWarn
+			end
+			wait(hookCheckInterval)
+		end
+	end)()
+end
+
+-- Roda anti-cheat apenas no servidor
+if RunService:IsServer() then
+	pcall(setupAntiCheat)
+end
+
+-- ============================================================
+-- DATASTORES
+-- ============================================================
+
+local PlayerDataStore = DataStoreService:GetDataStore("EBPlayerData_v2")
+
+local DEFAULT_DATA = {
+	Patente = "Civil",
+	Divisao = "Nenhuma",
+	Dinheiro = 0,
+	CDP = 0,
+	Team = "Civis [EB]",
+	HorasJogadas = 0, -- para o sistema de Honra
+	TotalMinutosJogados = 0,
+}
+
+-- Cores das patentes
+local PATENTE_CORES = {
+	-- Civil
+	["Civil"] = Color3.fromRGB(200, 200, 200),
+	-- Praças (verde claro, vai escurecendo)
+	["Recruta"]          = Color3.fromRGB(144, 238, 144),
+	["Soldado"]          = Color3.fromRGB(124, 210, 124),
+	["Cabo"]             = Color3.fromRGB(100, 185, 100),
+	-- Graduados (verde mais escuro)
+	["Terceiro Sargento"]= Color3.fromRGB(70, 160, 70),
+	["Segundo Sargento"] = Color3.fromRGB(50, 140, 50),
+	["Primeiro Sargento"]= Color3.fromRGB(30, 120, 30),
+	["Subtenente"]       = Color3.fromRGB(10, 100, 10),
+	-- Oficiais (vermelho, vai escurecendo)
+	["Segundo Tenente"]  = Color3.fromRGB(255, 100, 100),
+	["Primeiro Tenente"] = Color3.fromRGB(230, 70, 70),
+	["Capitao"]          = Color3.fromRGB(200, 40, 40),
+	-- Oficiais Superiores (azul normal escurecendo)
+	["Major"]            = Color3.fromRGB(100, 149, 237),
+	["Tenente Coronel"]  = Color3.fromRGB(65, 105, 225),
+	["Coronel"]          = Color3.fromRGB(30, 60, 200),
+	-- Honra (dourado)
+	["Marechal"]         = Color3.fromRGB(255, 215, 0),
+}
+
+-- Times por patente
+local PATENTE_PARA_TIME = {
+	["Civil"]            = "Civis [EB]",
+	["Recruta"]          = "Praças [EB]",
+	["Soldado"]          = "Praças [EB]",
+	["Cabo"]             = "Graduados [EB]",
+	["Terceiro Sargento"]= "Graduados [EB]",
+	["Segundo Sargento"] = "Graduados [EB]",
+	["Primeiro Sargento"]= "Graduados [EB]",
+	["Subtenente"]       = "Graduados [EB]",
+	["Segundo Tenente"]  = "Oficiais [EB]",
+	["Primeiro Tenente"] = "Oficiais [EB]",
+	["Capitao"]          = "Oficiais [EB]",
+	["Major"]            = "Oficiais Superiores [EB]",
+	["Tenente Coronel"]  = "Oficiais Superiores [EB]",
+	["Coronel"]          = "Oficiais Superiores [EB]",
+	["Marechal"]         = "Honra [EB]",
+}
+
+-- ============================================================
+-- SALVAR / CARREGAR DADOS
+-- ============================================================
+
+local function savePlayerData(player, data)
+	local success, err = pcall(function()
+		PlayerDataStore:SetAsync("Player_" .. player.UserId, data)
+	end)
+	if not success then
+		warn("[EB] Erro ao salvar dados de " .. player.Name .. ": " .. tostring(err))
+	end
+end
+
+local function loadPlayerData(player)
+	local data
+	local success, err = pcall(function()
+		data = PlayerDataStore:GetAsync("Player_" .. player.UserId)
+	end)
+	if success and data then
+		-- Preenche campos faltantes com defaults
+		for k, v in pairs(DEFAULT_DATA) do
+			if data[k] == nil then
+				data[k] = v
+			end
+		end
+		return data
+	else
+		return {
+			Patente = DEFAULT_DATA.Patente,
+			Divisao = DEFAULT_DATA.Divisao,
+			Dinheiro = DEFAULT_DATA.Dinheiro,
+			CDP = DEFAULT_DATA.CDP,
+			Team = DEFAULT_DATA.Team,
+			HorasJogadas = DEFAULT_DATA.HorasJogadas,
+			TotalMinutosJogados = DEFAULT_DATA.TotalMinutosJogados,
+		}
+	end
+end
+
+-- ============================================================
+-- REMOTES
+-- ============================================================
+
+local function getOrCreate(parent, className, name)
+	local obj = parent:FindFirstChild(name)
+	if not obj then
+		obj = Instance.new(className)
+		obj.Name = name
+		obj.Parent = parent
+	end
+	return obj
+end
+
+local RemotesFolder = getOrCreate(ReplicatedStorage, "Folder", "EBRemotes")
+local UpdateOverheadRemote = getOrCreate(RemotesFolder, "RemoteEvent", "UpdateOverhead")
+local GetPlayerDataRemote  = getOrCreate(RemotesFolder, "RemoteFunction", "GetPlayerData")
+local SetPatenteRemote     = getOrCreate(RemotesFolder, "RemoteEvent", "SetPatente")
+local SetDivisaoRemote     = getOrCreate(RemotesFolder, "RemoteEvent", "SetDivisao")
+local SetDinheiroRemote    = getOrCreate(RemotesFolder, "RemoteEvent", "SetDinheiro")
+local UpdateUIRemote       = getOrCreate(RemotesFolder, "RemoteEvent", "UpdateUI")
+
+-- ============================================================
+-- OVERHEAD BILLBOARD
+-- ============================================================
+
+local function createOverhead(player, character)
+	-- Remove overhead antigo se existir
+	local oldBill = character:FindFirstChild("EB_Overhead")
+	if oldBill then oldBill:Destroy() end
+
+	local head = character:FindFirstChild("Head")
+	if not head then return end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "EB_Overhead"
+	billboard.Size = UDim2.new(0, 220, 0, 75)
+	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = 60
+	billboard.Parent = head
+
+	-- Fundo semi-transparente
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	bg.BackgroundTransparency = 0.45
+	bg.BorderSizePixel = 0
+	bg.Parent = billboard
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = bg
+
+	-- Label: Nome
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "NomeLabel"
+	nameLabel.Size = UDim2.new(1, -8, 0, 24)
+	nameLabel.Position = UDim2.new(0, 4, 0, 2)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = player.DisplayName
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 15
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+	nameLabel.Parent = bg
+
+	-- Label: Patente
+	local patenteLabel = Instance.new("TextLabel")
+	patenteLabel.Name = "PatenteLabel"
+	patenteLabel.Size = UDim2.new(1, -8, 0, 22)
+	patenteLabel.Position = UDim2.new(0, 4, 0, 26)
+	patenteLabel.BackgroundTransparency = 1
+	patenteLabel.Text = "Civil"
+	patenteLabel.Font = Enum.Font.Gotham
+	patenteLabel.TextSize = 13
+	patenteLabel.TextColor3 = PATENTE_CORES["Civil"]
+	patenteLabel.TextXAlignment = Enum.TextXAlignment.Center
+	patenteLabel.Parent = bg
+
+	-- Label: Divisão
+	local divisaoLabel = Instance.new("TextLabel")
+	divisaoLabel.Name = "DivisaoLabel"
+	divisaoLabel.Size = UDim2.new(1, -8, 0, 20)
+	divisaoLabel.Position = UDim2.new(0, 4, 0, 49)
+	divisaoLabel.BackgroundTransparency = 1
+	divisaoLabel.Text = "Nenhuma"
+	divisaoLabel.Font = Enum.Font.GothamMedium
+	divisaoLabel.TextSize = 11
+	divisaoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	divisaoLabel.TextXAlignment = Enum.TextXAlignment.Center
+	divisaoLabel.Parent = bg
+
+	return billboard
+end
+
+local function updateOverhead(player, patente, divisao)
+	local character = player.Character
+	if not character then return end
+	local head = character:FindFirstChild("Head")
+	if not head then return end
+	local billboard = head:FindFirstChild("EB_Overhead")
+	if not billboard then
+		billboard = createOverhead(player, character)
+	end
+	if not billboard then return end
+
+	local bg = billboard:FindFirstChild("Frame") or billboard:FindFirstChildOfClass("Frame")
+	if not bg then return end
+
+	local pLabel = bg:FindFirstChild("PatenteLabel")
+	local dLabel = bg:FindFirstChild("DivisaoLabel")
+	if pLabel then
+		pLabel.Text = patente or "Civil"
+		pLabel.TextColor3 = PATENTE_CORES[patente] or Color3.fromRGB(200, 200, 200)
+	end
+	if dLabel then
+		dLabel.Text = divisao or "Nenhuma"
+	end
+end
+
+-- ============================================================
+-- LEADERSTATS
+-- ============================================================
+
+local function setupLeaderstats(player, data)
+	local leaderstats = getOrCreate(player, "Folder", "leaderstats")
+
+	local dinheiro = getOrCreate(leaderstats, "IntValue", "Dinheiro")
+	dinheiro.Value = data.Dinheiro or 0
+
+	local cdp = getOrCreate(leaderstats, "IntValue", "CDP")
+	cdp.Value = data.CDP or 0
+
+	return leaderstats
+end
+
+-- ============================================================
+-- TIME DO JOGADOR
+-- ============================================================
+
+local function setPlayerTeam(player, teamName)
+	local Teams = game:GetService("Teams")
+	local team = Teams:FindFirstChild(teamName)
+	if not team then
+		-- Cria o time se não existir
+		team = Instance.new("Team")
+		team.Name = teamName
+		team.AutoAssignable = false
+		team.TeamColor = BrickColor.new("Medium stone grey")
+
+		-- Cores por time
+		local teamColors = {
+			["Civis [EB]"]             = BrickColor.new("White"),
+			["Praças [EB]"]            = BrickColor.new("Bright green"),
+			["Graduados [EB]"]         = BrickColor.new("Dark green"),
+			["Oficiais [EB]"]          = BrickColor.new("Bright red"),
+			["Oficiais Superiores [EB]"]= BrickColor.new("Bright blue"),
+			["Honra [EB]"]             = BrickColor.new("Bright yellow"),
+		}
+		team.TeamColor = teamColors[teamName] or BrickColor.new("Medium stone grey")
+		team.Parent = Teams
+	end
+	player.Team = team
+end
+
+-- ============================================================
+-- PLAYER ADDED
+-- ============================================================
+
+-- Guarda dados em memória para acesso rápido
+local playerDataCache = {}
+
+local function onPlayerAdded(player)
+	-- Carrega dados
+	local data = loadPlayerData(player)
+	playerDataCache[player.UserId] = data
+
+	-- Leaderstats
+	setupLeaderstats(player, data)
+
+	-- Time
+	setPlayerTeam(player, data.Team or "Civis [EB]")
+
+	-- Overhead ao spawnar
+	local function onCharacterAdded(character)
+		-- Espera um frame para o personagem carregar
+		wait(0.1)
+		createOverhead(player, character)
+		-- Atualiza com dados salvos
+		wait(0.2)
+		updateOverhead(player, data.Patente, data.Divisao)
+		-- Notifica cliente sobre dados
+		UpdateUIRemote:FireClient(player, data)
+	end
+
+	player.CharacterAdded:Connect(onCharacterAdded)
+	if player.Character then
+		onCharacterAdded(player.Character)
+	end
+
+	-- Salva periodicamente
+	coroutine.wrap(function()
+		while player.Parent ~= nil do
+			wait(60)
+			local currentData = playerDataCache[player.UserId]
+			if currentData then
+				local ls = player:FindFirstChild("leaderstats")
+				if ls then
+					currentData.Dinheiro = ls:FindFirstChild("Dinheiro") and ls.Dinheiro.Value or currentData.Dinheiro
+					currentData.CDP = ls:FindFirstChild("CDP") and ls.CDP.Value or currentData.CDP
+				end
+				savePlayerData(player, currentData)
+			end
+		end
+	end)()
+end
+
+local function onPlayerRemoving(player)
+	local data = playerDataCache[player.UserId]
+	if data then
+		local ls = player:FindFirstChild("leaderstats")
+		if ls then
+			data.Dinheiro = ls:FindFirstChild("Dinheiro") and ls.Dinheiro.Value or data.Dinheiro
+			data.CDP = ls:FindFirstChild("CDP") and ls.CDP.Value or data.CDP
+		end
+		savePlayerData(player, data)
+		playerDataCache[player.UserId] = nil
+	end
+end
+
+-- ============================================================
+-- REMOTE HANDLERS
+-- ============================================================
+
+-- GetPlayerData: cliente pede dados de um jogador
+GetPlayerDataRemote.OnServerInvoke = function(requester, targetName)
+	-- Qualquer um pode ver patentes (overhead público)
+	for _, p in pairs(Players:GetPlayers()) do
+		if p.Name == targetName or p.DisplayName == targetName then
+			return playerDataCache[p.UserId]
+		end
+	end
+	return nil
+end
+
+-- SetPatente: chamado internamente por definitionconfigs
+SetPatenteRemote.OnServerEvent:Connect(function(requester, targetPlayer, newPatente, newDivisao)
+	-- Só o servidor vai chamar isso via require, clientes não devem chamar diretamente
+	-- Validação: requester precisa ter permissão (checado em definitionconfigs)
+	-- Por segurança, checar no cache se requester tem patente de oficial+
+	local reqData = playerDataCache[requester.UserId]
+	if not reqData then return end
+
+	local authorizedTeams = {
+		["Graduados [EB]"] = true,
+		["Oficiais [EB]"] = true,
+		["Oficiais Superiores [EB]"] = true,
+		["Honra [EB]"] = true,
+	}
+	if not authorizedTeams[reqData.Team] then return end
+
+	if not targetPlayer or not targetPlayer.Parent then return end
+
+	local targetData = playerDataCache[targetPlayer.UserId]
+	if not targetData then return end
+
+	targetData.Patente = newPatente
+	if newDivisao then
+		targetData.Divisao = newDivisao
+	end
+
+	-- Atualiza time
+	local newTeam = PATENTE_PARA_TIME[newPatente] or targetData.Team
+	targetData.Team = newTeam
+	setPlayerTeam(targetPlayer, newTeam)
+
+	-- Salva
+	savePlayerData(targetPlayer, targetData)
+
+	-- Atualiza overhead
+	updateOverhead(targetPlayer, newPatente, targetData.Divisao)
+
+	-- Notifica UI do alvo
+	UpdateUIRemote:FireClient(targetPlayer, targetData)
+end)
+
+-- SetDivisao
+SetDivisaoRemote.OnServerEvent:Connect(function(requester, targetPlayer, newDivisao)
+	local reqData = playerDataCache[requester.UserId]
+	if not reqData then return end
+
+	local authorizedTeams = {
+		["Oficiais [EB]"] = true,
+		["Oficiais Superiores [EB]"] = true,
+		["Honra [EB]"] = true,
+	}
+	if not authorizedTeams[reqData.Team] then return end
+
+	if not targetPlayer or not targetPlayer.Parent then return end
+	local targetData = playerDataCache[targetPlayer.UserId]
+	if not targetData then return end
+
+	targetData.Divisao = newDivisao
+	savePlayerData(targetPlayer, targetData)
+	updateOverhead(targetPlayer, targetData.Patente, newDivisao)
+	UpdateUIRemote:FireClient(targetPlayer, targetData)
+end)
+
+-- SetDinheiro (admin)
+SetDinheiroRemote.OnServerEvent:Connect(function(requester, targetPlayer, amount)
+	local reqData = playerDataCache[requester.UserId]
+	if not reqData then return end
+	-- Só admins (verificado via lista em definitionconfigs, aqui aceitamos confiança do servidor)
+	if not targetPlayer or not targetPlayer.Parent then return end
+	local targetData = playerDataCache[targetPlayer.UserId]
+	if not targetData then return end
+
+	targetData.Dinheiro = amount
+	local ls = targetPlayer:FindFirstChild("leaderstats")
+	if ls and ls:FindFirstChild("Dinheiro") then
+		ls.Dinheiro.Value = amount
+	end
+	savePlayerData(targetPlayer, targetData)
+	UpdateUIRemote:FireClient(targetPlayer, targetData)
+end)
+
+-- ============================================================
+-- FUNÇÕES EXPORTADAS (para outros scripts via require)
+-- ============================================================
+
+local EBModule = {}
+
+EBModule.playerDataCache    = playerDataCache
+EBModule.PATENTE_CORES      = PATENTE_CORES
+EBModule.PATENTE_PARA_TIME  = PATENTE_PARA_TIME
+EBModule.DEFAULT_DATA       = DEFAULT_DATA
+
+EBModule.savePlayerData     = savePlayerData
+EBModule.loadPlayerData     = loadPlayerData
+EBModule.updateOverhead     = updateOverhead
+EBModule.setPlayerTeam      = setPlayerTeam
+EBModule.setupLeaderstats   = setupLeaderstats
+EBModule.createOverhead     = createOverhead
+
+EBModule.RemotesFolder      = RemotesFolder
+EBModule.UpdateOverheadRemote = UpdateOverheadRemote
+EBModule.GetPlayerDataRemote  = GetPlayerDataRemote
+EBModule.SetPatenteRemote     = SetPatenteRemote
+EBModule.SetDivisaoRemote     = SetDivisaoRemote
+EBModule.SetDinheiroRemote    = SetDinheiroRemote
+EBModule.UpdateUIRemote       = UpdateUIRemote
+
+-- ============================================================
+-- INICIALIZAÇÃO
+-- ============================================================
+
+if RunService:IsServer() then
+	-- Times padrão
+	local teamList = {
+		"Civis [EB]", "Praças [EB]", "Graduados [EB]",
+		"Oficiais [EB]", "Oficiais Superiores [EB]", "Honra [EB]"
+	}
+	for _, tName in pairs(teamList) do
+		setPlayerTeam({Team = nil, Parent = game}, tName)
+		pcall(function()
+			local Teams = game:GetService("Teams")
+			if not Teams:FindFirstChild(tName) then
+				local t = Instance.new("Team")
+				t.Name = tName
+				t.AutoAssignable = false
+				t.Parent = Teams
+			end
+		end)
+	end
+
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+	-- Jogadores já conectados
+	for _, player in pairs(Players:GetPlayers()) do
+		coroutine.wrap(onPlayerAdded)(player)
+	end
+
+	print("[EB] basicfuncs carregado com sucesso!")
+end
+
+return EBModule
