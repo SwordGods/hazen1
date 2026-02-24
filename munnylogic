@@ -1,1 +1,160 @@
+-- ███╗   ███╗██╗   ██╗███╗   ██╗███╗   ██╗██╗   ██╗
+-- ████╗ ████║██║   ██║████╗  ██║████╗  ██║╚██╗ ██╔╝
+-- ██╔████╔██║██║   ██║██╔██╗ ██║██╔██╗ ██║ ╚████╔╝
+-- ██║╚██╔╝██║██║   ██║██║╚██╗██║██║╚██╗██║  ╚██╔╝
+-- ██║ ╚═╝ ██║╚██████╔╝██║ ╚████║██║ ╚████║   ██║
+-- ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝   ╚═╝
+-- Exército Brasileiro ROBLOX - munnylogic v1.0
+-- Lógica de pagamento por tempo jogado
 
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Aguarda basicfuncs estar carregado
+local RemotesFolder = ReplicatedStorage:WaitForChild("EBRemotes", 10)
+local UpdateUIRemote = RemotesFolder and RemotesFolder:WaitForChild("UpdateUIRemote", 5)
+
+-- ============================================================
+-- CONFIGURAÇÃO DE PAGAMENTOS
+-- ============================================================
+
+-- { teamName = { intervaloSegundos, valorPago } }
+local PAYMENT_CONFIG = {
+	["Praças [EB]"]              = { interval = 180,  amount = 2000 },      -- 3 min
+	["Graduados [EB]"]           = { interval = 180,  amount = 10000 },     -- 3 min
+	["Oficiais [EB]"]            = { interval = 600,  amount = 50000 },     -- 10 min
+	["Oficiais Superiores [EB]"] = { interval = 1200, amount = 150000 },    -- 20 min
+	["Honra [EB]"]               = { interval = 3600, amount = 1000000 },   -- 1 hora
+}
+
+-- Controle de timers por jogador
+-- { userId = { teamName = { lastPay = tick(), accumulatedSeconds = 0 } } }
+local playerTimers = {}
+
+-- ============================================================
+-- FUNÇÕES AUXILIARES
+-- ============================================================
+
+local function getTeamName(player)
+	if player.Team then
+		return player.Team.Name
+	end
+	return nil
+end
+
+local function addDinheiro(player, amount)
+	local ls = player:FindFirstChild("leaderstats")
+	if not ls then return end
+	local dinheiroVal = ls:FindFirstChild("Dinheiro")
+	if not dinheiroVal then return end
+	dinheiroVal.Value = dinheiroVal.Value + amount
+
+	-- Salva no cache do basicfuncs se disponível
+	pcall(function()
+		local EBCore = require(game:GetService("ServerScriptService"):FindFirstChild("EBLoader"))
+		if EBCore and EBCore.playerDataCache and EBCore.playerDataCache[player.UserId] then
+			EBCore.playerDataCache[player.UserId].Dinheiro = dinheiroVal.Value
+		end
+	end)
+
+	-- Notifica UI do cliente
+	if RemotesFolder then
+		local uiRemote = RemotesFolder:FindFirstChild("UpdateUI")
+		if uiRemote then
+			pcall(function()
+				uiRemote:FireClient(player, { Dinheiro = dinheiroVal.Value })
+			end)
+		end
+	end
+end
+
+-- ============================================================
+-- INICIALIZAÇÃO DE TIMER POR JOGADOR
+-- ============================================================
+
+local function initPlayerTimer(player)
+	playerTimers[player.UserId] = {
+		lastCheck = tick(),
+		teamTimers = {},
+	}
+end
+
+local function cleanPlayerTimer(player)
+	playerTimers[player.UserId] = nil
+end
+
+-- ============================================================
+-- LOOP PRINCIPAL DE PAGAMENTO
+-- ============================================================
+
+local function paymentLoop()
+	while true do
+		local now = tick()
+
+		for _, player in pairs(Players:GetPlayers()) do
+			local uid = player.UserId
+			if not playerTimers[uid] then
+				initPlayerTimer(player)
+			end
+
+			local teamName = getTeamName(player)
+			if teamName and PAYMENT_CONFIG[teamName] then
+				local cfg = PAYMENT_CONFIG[teamName]
+				local timerData = playerTimers[uid]
+
+				-- Inicializa timer do time atual se necessário
+				if not timerData.teamTimers[teamName] then
+					timerData.teamTimers[teamName] = {
+						accumulated = 0,
+						lastTick = now,
+					}
+				end
+
+				local tData = timerData.teamTimers[teamName]
+				local elapsed = now - tData.lastTick
+				tData.lastTick = now
+				tData.accumulated = tData.accumulated + elapsed
+
+				-- Verifica se atingiu o intervalo de pagamento
+				if tData.accumulated >= cfg.interval then
+					local payments = math.floor(tData.accumulated / cfg.interval)
+					tData.accumulated = tData.accumulated - (payments * cfg.interval)
+
+					local totalPay = payments * cfg.amount
+					pcall(addDinheiro, player, totalPay)
+
+					-- Log de pagamento
+					print(string.format(
+						"[EB-MUNNY] %s (%s) recebeu R$%d",
+						player.Name, teamName, totalPay
+					))
+				end
+			end
+		end
+
+		wait(10) -- Checa a cada 10 segundos para precisão razoável
+	end
+end
+
+-- ============================================================
+-- CONEXÕES
+-- ============================================================
+
+if RunService:IsServer() then
+	Players.PlayerAdded:Connect(initPlayerTimer)
+	Players.PlayerRemoving:Connect(cleanPlayerTimer)
+
+	-- Inicializa jogadores já conectados
+	for _, player in pairs(Players:GetPlayers()) do
+		initPlayerTimer(player)
+	end
+
+	-- Inicia o loop de pagamento
+	coroutine.wrap(paymentLoop)()
+
+	print("[EB] munnylogic carregado com sucesso!")
+end
+
+return {}
