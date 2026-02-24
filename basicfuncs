@@ -786,5 +786,5 @@ end)
 -- Mensagem de admin no cliente (recepção)
 -- (este handler fica no definitionconfigs — aqui só registramos o remote)
 
-print("[EB] Remotes de Admin v2.0 registrados!")
+print("[EB] Remotes de Admin v2.0 registrados")
 return EBModule
