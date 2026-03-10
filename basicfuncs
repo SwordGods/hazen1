@@ -1,3 +1,12 @@
+-- ██████╗  █████╗ ███████╗██╗ ██████╗    ███████╗██████╗
+-- ██╔══██╗██╔══██╗██╔════╝██║██╔════╝    ██╔════╝██╔══██╗
+-- ██████╔╝███████║███████╗██║██║         █████╗  ██████╔╝
+-- ██╔══██╗██╔══██║╚════██║██║██║         ██╔══╝  ██╔══██╗
+-- ██████╔╝██║  ██║███████║██║╚██████╗    ███████╗██████╔╝
+-- ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝   ╚══════╝╚═════╝
+-- Exército Brasileiro ROBLOX - basicfuncs v1.0
+-- Script principal: Overheads, LeaderStats, Anti-Cheat, UI
+
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
@@ -589,7 +598,7 @@ if RunService:IsServer() then
 	print("[EB] basicfuncs carregado com sucesso!")
 end
 
-
+return EBModule
 
 -- ============================================================
 -- REMOTES EXTRAS PARA ADMIN (adicionados na v2.0)
@@ -786,5 +795,4 @@ end)
 -- Mensagem de admin no cliente (recepção)
 -- (este handler fica no definitionconfigs — aqui só registramos o remote)
 
-print("[EB] Remotes de Admin v2.0 registrados")
-return EBModule
+print("[EB] Remotes de Admin v2.0 registrados!")
