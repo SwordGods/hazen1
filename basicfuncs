@@ -1,214 +1,399 @@
--- ██████╗  █████╗ ███████╗██╗ ██████╗    ███████╗██████╗
--- ██╔══██╗██╔══██╗██╔════╝██║██╔════╝    ██╔════╝██╔══██╗
--- ██████╔╝███████║███████╗██║██║         █████╗  ██████╔╝
--- ██╔══██╗██╔══██║╚════██║██║██║         ██╔══╝  ██╔══██╗
--- ██████╔╝██║  ██║███████║██║╚██████╗    ███████╗██████╔╝
--- ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝   ╚══════╝╚═════╝
--- Exército Brasileiro ROBLOX - basicfuncs v1.0
--- Script principal: Overheads, LeaderStats, Anti-Cheat, UI
+-- EB basicfuncs v3.0
+-- Overheads | LeaderStats | Patentes | Times | CDP | Anti-Abuso | Anti-Cheat
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
+local RunService        = game:GetService("RunService")
+local Players           = game:GetService("Players")
+local DataStoreService  = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
+local TweenService      = game:GetService("TweenService")
+
+if not RunService:IsServer() then return end
 
 -- ============================================================
--- ANTI-CHEAT / PROTEÇÕES
+-- HIERARQUIA DE PATENTES (ordem importa — índice = nível)
 -- ============================================================
 
-local _ENV_BACKUP = {}
-local PROTECTED_GLOBALS = {
-	"require", "loadstring", "pcall", "xpcall", "pairs", "ipairs",
-	"tostring", "tonumber", "type", "select", "unpack", "table",
-	"string", "math", "coroutine", "game", "workspace", "script"
+local RANK_ORDER = {
+    "Civil",            -- 1
+    "Recruta",          -- 2
+    "Soldado",          -- 3
+    "Cabo",             -- 4
+    "Terceiro Sargento",-- 5
+    "Segundo Sargento", -- 6
+    "Primeiro Sargento",-- 7
+    "Subtenente",       -- 8
+    "Segundo Tenente",  -- 9
+    "Primeiro Tenente", -- 10
+    "Capitao",          -- 11
+    "Major",            -- 12
+    "Tenente Coronel",  -- 13
+    "Coronel",          -- 14
+    "Marechal",         -- 15
 }
 
--- Proteção anti-hookfunction
-local function protectFunction(fn)
-	return newproxy and fn or fn
+local RANK_INDEX = {}
+for i, r in ipairs(RANK_ORDER) do RANK_INDEX[r] = i end
+
+-- Times por patente
+local RANK_TO_TEAM = {
+    ["Civil"]             = "Civis [EB]",
+    ["Recruta"]           = "Praças [EB]",
+    ["Soldado"]           = "Praças [EB]",
+    ["Cabo"]              = "Graduados [EB]",
+    ["Terceiro Sargento"] = "Graduados [EB]",
+    ["Segundo Sargento"]  = "Graduados [EB]",
+    ["Primeiro Sargento"] = "Graduados [EB]",
+    ["Subtenente"]        = "Graduados [EB]",
+    ["Segundo Tenente"]   = "Oficiais [EB]",
+    ["Primeiro Tenente"]  = "Oficiais [EB]",
+    ["Capitao"]           = "Oficiais [EB]",
+    ["Major"]             = "Oficiais Superiores [EB]",
+    ["Tenente Coronel"]   = "Oficiais Superiores [EB]",
+    ["Coronel"]           = "Oficiais Superiores [EB]",
+    ["Marechal"]          = "Honra [EB]",
+}
+
+-- Times com nível de autoridade (quanto maior, mais pode)
+local TEAM_AUTH = {
+    ["Civis [EB]"]                = 0,
+    ["Praças [EB]"]               = 1,
+    ["Graduados [EB]"]            = 2,
+    ["Oficiais [EB]"]             = 3,
+    ["Oficiais Superiores [EB]"]  = 4,
+    ["Honra [EB]"]                = 5,
+}
+
+-- O que cada nível de time pode promover (máximo de patente que pode DAR)
+-- Graduados: só Recruta
+-- Oficiais: até Subtenente
+-- Oficiais Superiores: até Capitão
+-- Honra: até Coronel
+-- Admin (bypass): qualquer patente
+local MAX_PROMOTE_BY_TEAM = {
+    ["Graduados [EB]"]           = RANK_INDEX["Recruta"],
+    ["Oficiais [EB]"]            = RANK_INDEX["Subtenente"],
+    ["Oficiais Superiores [EB]"] = RANK_INDEX["Capitao"],
+    ["Honra [EB]"]               = RANK_INDEX["Coronel"],
+}
+
+-- Cores das patentes
+local RANK_COLOR = {
+    ["Civil"]             = Color3.fromRGB(200,200,200),
+    ["Recruta"]           = Color3.fromRGB(144,238,144),
+    ["Soldado"]           = Color3.fromRGB(124,210,124),
+    ["Cabo"]              = Color3.fromRGB(100,185,100),
+    ["Terceiro Sargento"] = Color3.fromRGB(70,160,70),
+    ["Segundo Sargento"]  = Color3.fromRGB(50,140,50),
+    ["Primeiro Sargento"] = Color3.fromRGB(30,120,30),
+    ["Subtenente"]        = Color3.fromRGB(10,100,10),
+    ["Segundo Tenente"]   = Color3.fromRGB(255,100,100),
+    ["Primeiro Tenente"]  = Color3.fromRGB(230,70,70),
+    ["Capitao"]           = Color3.fromRGB(200,40,40),
+    ["Major"]             = Color3.fromRGB(100,149,237),
+    ["Tenente Coronel"]   = Color3.fromRGB(65,105,225),
+    ["Coronel"]           = Color3.fromRGB(30,60,200),
+    ["Marechal"]          = Color3.fromRGB(255,215,0),
+}
+
+-- ============================================================
+-- DEVS / ADMINS HARDCODED
+-- ============================================================
+
+local DEVS       = {"sydgei10","BolinhoFofo1236"}
+local UNBANNABLES = {"sydgei10","BolinhoFofo1236"}
+
+local function isDev(name)
+    for _, d in pairs(DEVS) do if d:lower()==name:lower() then return true end end
+    return false
 end
 
--- Anti-DEX Explorer / Anti-Script Injector
-local function setupAntiCheat()
-	-- Bloqueia tentativas de explorar instâncias do servidor
-	-- Verifica scripts suspeitos sendo inseridos
-	local function checkSuspiciousScript(child)
-		if child:IsA("LocalScript") or child:IsA("Script") or child:IsA("ModuleScript") then
-			-- Scripts não autorizados fora de locais permitidos
-			local allowedParents = {
-				game:GetService("StarterGui"),
-				game:GetService("StarterPack"),
-				game:GetService("StarterPlayer"),
-				game:GetService("ServerScriptService"),
-				game:GetService("ReplicatedStorage"),
-				game:GetService("Workspace"),
-			}
-			local isAllowed = false
-			for _, allowed in pairs(allowedParents) do
-				if child:IsDescendantOf(allowed) then
-					isAllowed = true
-					break
-				end
-			end
-			-- Scripts injetados em locais errados = suspeito
-			if not isAllowed then
-				pcall(function() child:Destroy() end)
-			end
-		end
-	end
-
-	-- Monitora inserção de novos objetos no workspace
-	workspace.DescendantAdded:Connect(function(child)
-		pcall(checkSuspiciousScript, child)
-	end)
-
-	-- Anti-Backdoor: Verifica RemoteEvents suspeitas
-	local function scanForBackdoors()
-		for _, obj in pairs(game:GetDescendants()) do
-			if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-				local name = obj.Name:lower()
-				-- Nomes suspeitos comuns de backdoors
-				local suspiciousNames = {
-					"re", "rf", "evt", "event", "remote", "cmd", "exec",
-					"run", "execute", "backdoor", "loader", "inject"
-				}
-				for _, sus in pairs(suspiciousNames) do
-					if name == sus then
-						-- Log suspeito mas não destroi (pode ser legítimo)
-						warn("[EB-ANTICHEAT] Remote suspeita detectada: " .. obj:GetFullName())
-					end
-				end
-			end
-		end
-	end
-
-	-- Roda scan a cada 30 segundos
-	coroutine.wrap(function()
-		while true do
-			pcall(scanForBackdoors)
-			wait(30)
-		end
-	end)()
-
-	-- Anti-HookFunction: Verifica integridade de funções críticas
-	local originalWarn = warn
-	local originalPrint = print
-	local hookCheckInterval = 5
-
-	coroutine.wrap(function()
-		while true do
-			-- Verifica se funções foram substituídas
-			if warn ~= originalWarn then
-				warn = originalWarn
-			end
-			wait(hookCheckInterval)
-		end
-	end)()
-end
-
--- Roda anti-cheat apenas no servidor
-if RunService:IsServer() then
-	pcall(setupAntiCheat)
+-- adminList preenchida pelo EBLoader
+local adminList = {}
+local function isAdmin(name)
+    if isDev(name) then return true end
+    return adminList[name] or adminList[name:lower()] or false
 end
 
 -- ============================================================
 -- DATASTORES
 -- ============================================================
 
-local PlayerDataStore = DataStoreService:GetDataStore("EBPlayerData_v2")
+local PlayerDS = DataStoreService:GetDataStore("EBPlayerData_v3")
+local BanDS    = DataStoreService:GetDataStore("EBBanList_v1")
 
-local DEFAULT_DATA = {
-	Patente = "Civil",
-	Divisao = "Nenhuma",
-	Dinheiro = 0,
-	CDP = 0,
-	Team = "Civis [EB]",
-	HorasJogadas = 0, -- para o sistema de Honra
-	TotalMinutosJogados = 0,
+local DEFAULT = {
+    Patente  = "Civil",
+    Divisao  = "Nenhuma",
+    Dinheiro = 0,
+    CDP      = 0,          -- horas de bloqueio restantes
+    Team     = "Civis [EB]",
+    TotalMin = 0,
 }
 
--- Cores das patentes
-local PATENTE_CORES = {
-	-- Civil
-	["Civil"] = Color3.fromRGB(200, 200, 200),
-	-- Praças (verde claro, vai escurecendo)
-	["Recruta"]          = Color3.fromRGB(144, 238, 144),
-	["Soldado"]          = Color3.fromRGB(124, 210, 124),
-	["Cabo"]             = Color3.fromRGB(100, 185, 100),
-	-- Graduados (verde mais escuro)
-	["Terceiro Sargento"]= Color3.fromRGB(70, 160, 70),
-	["Segundo Sargento"] = Color3.fromRGB(50, 140, 50),
-	["Primeiro Sargento"]= Color3.fromRGB(30, 120, 30),
-	["Subtenente"]       = Color3.fromRGB(10, 100, 10),
-	-- Oficiais (vermelho, vai escurecendo)
-	["Segundo Tenente"]  = Color3.fromRGB(255, 100, 100),
-	["Primeiro Tenente"] = Color3.fromRGB(230, 70, 70),
-	["Capitao"]          = Color3.fromRGB(200, 40, 40),
-	-- Oficiais Superiores (azul normal escurecendo)
-	["Major"]            = Color3.fromRGB(100, 149, 237),
-	["Tenente Coronel"]  = Color3.fromRGB(65, 105, 225),
-	["Coronel"]          = Color3.fromRGB(30, 60, 200),
-	-- Honra (dourado)
-	["Marechal"]         = Color3.fromRGB(255, 215, 0),
-}
-
--- Times por patente
-local PATENTE_PARA_TIME = {
-	["Civil"]            = "Civis [EB]",
-	["Recruta"]          = "Praças [EB]",
-	["Soldado"]          = "Praças [EB]",
-	["Cabo"]             = "Graduados [EB]",
-	["Terceiro Sargento"]= "Graduados [EB]",
-	["Segundo Sargento"] = "Graduados [EB]",
-	["Primeiro Sargento"]= "Graduados [EB]",
-	["Subtenente"]       = "Graduados [EB]",
-	["Segundo Tenente"]  = "Oficiais [EB]",
-	["Primeiro Tenente"] = "Oficiais [EB]",
-	["Capitao"]          = "Oficiais [EB]",
-	["Major"]            = "Oficiais Superiores [EB]",
-	["Tenente Coronel"]  = "Oficiais Superiores [EB]",
-	["Coronel"]          = "Oficiais Superiores [EB]",
-	["Marechal"]         = "Honra [EB]",
-}
-
--- ============================================================
--- SALVAR / CARREGAR DADOS
--- ============================================================
-
-local function savePlayerData(player, data)
-	local success, err = pcall(function()
-		PlayerDataStore:SetAsync("Player_" .. player.UserId, data)
-	end)
-	if not success then
-		warn("[EB] Erro ao salvar dados de " .. player.Name .. ": " .. tostring(err))
-	end
+local function saveData(player, data)
+    pcall(function()
+        PlayerDS:SetAsync("P_"..player.UserId, data)
+    end)
 end
 
-local function loadPlayerData(player)
-	local data
-	local success, err = pcall(function()
-		data = PlayerDataStore:GetAsync("Player_" .. player.UserId)
-	end)
-	if success and data then
-		-- Preenche campos faltantes com defaults
-		for k, v in pairs(DEFAULT_DATA) do
-			if data[k] == nil then
-				data[k] = v
-			end
-		end
-		return data
-	else
-		return {
-			Patente = DEFAULT_DATA.Patente,
-			Divisao = DEFAULT_DATA.Divisao,
-			Dinheiro = DEFAULT_DATA.Dinheiro,
-			CDP = DEFAULT_DATA.CDP,
-			Team = DEFAULT_DATA.Team,
-			HorasJogadas = DEFAULT_DATA.HorasJogadas,
-			TotalMinutosJogados = DEFAULT_DATA.TotalMinutosJogados,
-		}
-	end
+local function loadData(player)
+    local ok, data = pcall(function()
+        return PlayerDS:GetAsync("P_"..player.UserId)
+    end)
+    if ok and data then
+        for k,v in pairs(DEFAULT) do if data[k]==nil then data[k]=v end end
+        return data
+    end
+    return {
+        Patente="Civil", Divisao="Nenhuma",
+        Dinheiro=0, CDP=0,
+        Team="Civis [EB]", TotalMin=0,
+    }
+end
+
+-- Ban
+local function isBanned(userId)
+    local ok,r = pcall(function() return BanDS:GetAsync("Ban_"..userId) end)
+    return ok and r ~= nil and r ~= false
+end
+local function banUser(userId, reason)
+    pcall(function() BanDS:SetAsync("Ban_"..userId, {reason=reason, ts=os.time()}) end)
+end
+local function unbanUser(userId)
+    pcall(function() BanDS:RemoveAsync("Ban_"..userId) end)
+end
+
+-- ============================================================
+-- CACHE EM MEMÓRIA
+-- ============================================================
+
+local cache = {}   -- [userId] = data
+
+-- ============================================================
+-- ANTI-ABUSO — Rate limiting e log
+-- ============================================================
+
+-- Registo de ações por requester: { [userId] = { [action] = {timestamps} } }
+local actionLog = {}
+
+-- Limites: máx ações num intervalo (segundos)
+local RATE_LIMITS = {
+    promote  = {max=5,  window=60},   -- 5 promoções por minuto
+    demote   = {max=3,  window=60},   -- 3 rebaixamentos por minuto
+    recruit  = {max=5,  window=60},   -- 5 recrutamentos por minuto
+    discharge= {max=3,  window=60},   -- 3 dispensas por minuto
+}
+
+local function checkRateLimit(userId, action)
+    local cfg = RATE_LIMITS[action]
+    if not cfg then return true end
+
+    local now = os.time()
+    actionLog[userId] = actionLog[userId] or {}
+    actionLog[userId][action] = actionLog[userId][action] or {}
+
+    -- Remove timestamps antigos
+    local clean = {}
+    for _, t in ipairs(actionLog[userId][action]) do
+        if now - t < cfg.window then table.insert(clean, t) end
+    end
+    actionLog[userId][action] = clean
+
+    if #clean >= cfg.max then return false end  -- bloqueado
+
+    table.insert(actionLog[userId][action], now)
+    return true
+end
+
+-- Log de ações suspeitas
+local suspectLog = {}
+local function logSuspect(player, reason)
+    suspectLog[player.UserId] = (suspectLog[player.UserId] or 0) + 1
+    warn(string.format("[EB-ANTIABUSOS] %s (%s) — %s [total: %d]",
+        player.Name, player.UserId, reason, suspectLog[player.UserId]))
+    -- Kick após 10 violações acumuladas
+    if suspectLog[player.UserId] >= 10 then
+        player:Kick("⛔ Você foi removido por comportamento suspeito repetido.")
+    end
+end
+
+-- ============================================================
+-- VALIDAÇÃO DE PERMISSÃO (coração do sistema)
+-- ============================================================
+
+--[[
+    Regras:
+    1. Ninguém pode se auto-promover ou se auto-rebaixar
+    2. Para PROMOVER alguém, sua patente deve ser estritamente MAIOR que a do alvo
+       E a patente destino deve estar dentro do seu MAX_PROMOTE_BY_TEAM
+    3. Para REBAIXAR (demote), só Oficiais Superiores+ podem rebaixar (dentro da hierarquia)
+       e só podem rebaixar alguém que esteja ABAIXO de si
+    4. CDP > 0 bloqueia promoções (só admin ignora CDP)
+    5. Admins bypass em tudo, exceto outros admins/devs (não podem rebaixar devs)
+]]
+
+local function getTeamAuth(teamName)
+    return TEAM_AUTH[teamName] or 0
+end
+
+local function canActOn(requester, target, newRank, isAdminBypass)
+    local reqData = cache[requester.UserId]
+    local tgtData = cache[target.UserId]
+    if not reqData or not tgtData then return false, "Dados não encontrados." end
+
+    -- Não pode agir em si mesmo
+    if requester.UserId == target.UserId then
+        return false, "Você não pode alterar sua própria patente."
+    end
+
+    -- Não pode agir em devs (exceto outros devs)
+    if isDev(target.Name) and not isDev(requester.Name) then
+        return false, "Você não pode alterar a patente de um desenvolvedor."
+    end
+
+    -- Admin bypass: pode tudo (exceto devs, checado acima)
+    if isAdminBypass then return true, nil end
+
+    local reqRank    = RANK_INDEX[reqData.Patente] or 1
+    local tgtRank    = RANK_INDEX[tgtData.Patente] or 1
+    local newRankIdx = RANK_INDEX[newRank] or 1
+    local reqTeam    = reqData.Team
+    local reqAuth    = getTeamAuth(reqTeam)
+
+    -- Precisa de pelo menos Graduados para qualquer ação
+    if reqAuth < 2 then
+        return false, "Você não tem autoridade suficiente."
+    end
+
+    -- Requester deve ter patente MAIOR que o alvo para agir sobre ele
+    if reqRank <= tgtRank then
+        return false, "Sua patente não é superior à do alvo."
+    end
+
+    -- Verifica se é promoção ou rebaixamento
+    local isPromotion = newRankIdx > tgtRank
+    local isDemotion  = newRankIdx < tgtRank
+
+    if isPromotion then
+        -- Verifica max de promoção pelo time
+        local maxPromote = MAX_PROMOTE_BY_TEAM[reqTeam]
+        if not maxPromote then
+            return false, "Seu time não tem permissão de promover."
+        end
+        if newRankIdx > maxPromote then
+            return false, "Você não pode promover até "..newRank.." (limite do seu cargo)."
+        end
+
+        -- Verifica CDP do alvo
+        if (tgtData.CDP or 0) > 0 then
+            return false, string.format("%s está em CDP (%d h restantes). Apenas admin pode promover.",
+                target.DisplayName, tgtData.CDP)
+        end
+
+        -- Destino deve ser ACIMA do rank atual do alvo
+        if newRankIdx <= tgtRank then
+            return false, "Nova patente deve ser superior à atual."
+        end
+
+    elseif isDemotion then
+        -- Apenas Oficiais Superiores+ podem rebaixar
+        if reqAuth < 4 then
+            return false, "Apenas Oficiais Superiores ou superiores podem rebaixar membros."
+        end
+        -- Destino deve continuar abaixo da patente do requester
+        if newRankIdx >= reqRank then
+            return false, "Não pode rebaixar para uma patente igual ou superior à sua."
+        end
+        -- Pode rebaixar até Civil (dispensa total)
+    else
+        -- Mesma patente: sem efeito
+        return false, "A patente escolhida é a mesma que a atual."
+    end
+
+    return true, nil
+end
+
+-- ============================================================
+-- APLICAR MUDANÇA DE PATENTE (função central)
+-- ============================================================
+
+local function applyRankChange(target, newRank, newDivisao, addCDP, skipCDPAdd)
+    local data = cache[target.UserId]
+    if not data then return false end
+
+    local oldRank = data.Patente
+    local oldTeam = data.Team
+    local newTeam = RANK_TO_TEAM[newRank] or data.Team
+
+    data.Patente = newRank
+    data.Team    = newTeam
+
+    if newDivisao ~= nil then
+        data.Divisao = newDivisao ~= "" and newDivisao or data.Divisao
+    end
+
+    -- Se for promoção, adiciona 3h de CDP automaticamente
+    local oldIdx = RANK_INDEX[oldRank] or 1
+    local newIdx = RANK_INDEX[newRank] or 1
+    if newIdx > oldIdx and not skipCDPAdd then
+        data.CDP = (data.CDP or 0) + 3
+    end
+
+    -- Se virou Civil, limpa divisão
+    if newRank == "Civil" then
+        data.Divisao = "Nenhuma"
+        data.Team    = "Civis [EB]"
+    end
+
+    -- Atualiza leaderstats
+    local ls = target:FindFirstChild("leaderstats")
+    if ls then
+        if ls:FindFirstChild("CDP") then ls.CDP.Value = data.CDP end
+    end
+
+    -- Muda time
+    local Teams = game:GetService("Teams")
+    local team  = Teams:FindFirstChild(newTeam)
+    if not team then
+        team = Instance.new("Team")
+        team.Name = newTeam
+        team.AutoAssignable = false
+        local colors = {
+            ["Civis [EB]"]="White", ["Praças [EB]"]="Bright green",
+            ["Graduados [EB]"]="Dark green", ["Oficiais [EB]"]="Bright red",
+            ["Oficiais Superiores [EB]"]="Bright blue", ["Honra [EB]"]="Bright yellow",
+        }
+        team.TeamColor = BrickColor.new(colors[newTeam] or "Medium stone grey")
+        team.Parent = Teams
+    end
+    target.Team = team
+
+    -- Atualiza overhead
+    local character = target.Character
+    if character then
+        local head = character:FindFirstChild("Head")
+        if head then
+            local bb = head:FindFirstChild("EB_Overhead")
+            if bb then
+                local bg = bb:FindFirstChildOfClass("Frame")
+                if bg then
+                    local pL = bg:FindFirstChild("PatenteLabel")
+                    local dL = bg:FindFirstChild("DivisaoLabel")
+                    if pL then pL.Text=newRank; pL.TextColor3=RANK_COLOR[newRank] or Color3.fromRGB(200,200,200) end
+                    if dL then dL.Text=data.Divisao end
+                end
+            end
+        end
+    end
+
+    -- Salva e notifica
+    saveData(target, data)
+
+    local UpdateUI = ReplicatedStorage:FindFirstChild("EBRemotes") and
+                     ReplicatedStorage.EBRemotes:FindFirstChild("UpdateUI")
+    if UpdateUI then UpdateUI:FireClient(target, data) end
+
+    return true
 end
 
 -- ============================================================
@@ -216,120 +401,93 @@ end
 -- ============================================================
 
 local function getOrCreate(parent, className, name)
-	local obj = parent:FindFirstChild(name)
-	if not obj then
-		obj = Instance.new(className)
-		obj.Name = name
-		obj.Parent = parent
-	end
-	return obj
+    local o = parent:FindFirstChild(name)
+    if not o then o=Instance.new(className); o.Name=name; o.Parent=parent end
+    return o
 end
 
-local RemotesFolder = getOrCreate(ReplicatedStorage, "Folder", "EBRemotes")
-local UpdateOverheadRemote = getOrCreate(RemotesFolder, "RemoteEvent", "UpdateOverhead")
-local GetPlayerDataRemote  = getOrCreate(RemotesFolder, "RemoteFunction", "GetPlayerData")
-local SetPatenteRemote     = getOrCreate(RemotesFolder, "RemoteEvent", "SetPatente")
-local SetDivisaoRemote     = getOrCreate(RemotesFolder, "RemoteEvent", "SetDivisao")
-local SetDinheiroRemote    = getOrCreate(RemotesFolder, "RemoteEvent", "SetDinheiro")
-local UpdateUIRemote       = getOrCreate(RemotesFolder, "RemoteEvent", "UpdateUI")
+local RF = getOrCreate(ReplicatedStorage, "Folder", "EBRemotes")
+
+-- Remotes principais
+local R_UpdateUI      = getOrCreate(RF, "RemoteEvent",    "UpdateUI")
+local R_GetData       = getOrCreate(RF, "RemoteFunction", "GetPlayerData")
+local R_SetPatente    = getOrCreate(RF, "RemoteEvent",    "SetPatente")
+local R_SetDivisao    = getOrCreate(RF, "RemoteEvent",    "SetDivisao")
+local R_SetDinheiro   = getOrCreate(RF, "RemoteEvent",    "SetDinheiro")
+
+-- Remotes admin
+local R_AdminSetP     = getOrCreate(RF, "RemoteEvent",    "AdminSetPatente")
+local R_AdminSetDiv   = getOrCreate(RF, "RemoteEvent",    "AdminSetDivisao")
+local R_AdminSetCDP   = getOrCreate(RF, "RemoteEvent",    "AdminSetCDP")
+local R_AdminReset    = getOrCreate(RF, "RemoteEvent",    "AdminResetStats")
+local R_AdminSetTime  = getOrCreate(RF, "RemoteEvent",    "AdminSetTime")
+local R_AdminUnban    = getOrCreate(RF, "RemoteEvent",    "AdminUnban")
+local R_AdminGod      = getOrCreate(RF, "RemoteEvent",    "AdminGodMode")
+local R_AdminFreeze   = getOrCreate(RF, "RemoteEvent",    "AdminFreeze")
+local R_AdminKill     = getOrCreate(RF, "RemoteEvent",    "AdminKillPlayer")
+local R_AdminSpeed    = getOrCreate(RF, "RemoteEvent",    "AdminSpeedSet")
+local R_AdminJump     = getOrCreate(RF, "RemoteEvent",    "AdminJumpSet")
+local R_AdminMsg      = getOrCreate(RF, "RemoteEvent",    "AdminMessage")
+local R_AdminMsgCli   = getOrCreate(RF, "RemoteEvent",    "AdminMsgClient")
+local R_AdminShutdown = getOrCreate(RF, "RemoteEvent",    "AdminShutdown")
+local R_AdminBring    = getOrCreate(RF, "RemoteEvent",    "AdminBringPlayer")
+local R_Punish        = getOrCreate(RF, "RemoteEvent",    "AdminPunish")
+local R_Teleport      = getOrCreate(RF, "RemoteEvent",    "TeleportToPlayer")
+local R_Webhook       = getOrCreate(RF, "RemoteEvent",    "SendWebhook")
+local R_DevExec       = getOrCreate(RF, "RemoteEvent",    "DevExecute")
+local R_SrvSetP       = getOrCreate(RF, "BindableEvent",  "ServerSetPatente")
 
 -- ============================================================
--- OVERHEAD BILLBOARD
+-- OVERHEAD
 -- ============================================================
 
 local function createOverhead(player, character)
-	-- Remove overhead antigo se existir
-	local oldBill = character:FindFirstChild("EB_Overhead")
-	if oldBill then oldBill:Destroy() end
+    local old = character:FindFirstChild("EB_Overhead")
+    if old then old:Destroy() end
+    local head = character:FindFirstChild("Head")
+    if not head then return end
 
-	local head = character:FindFirstChild("Head")
-	if not head then return end
+    local bb = Instance.new("BillboardGui")
+    bb.Name="EB_Overhead"; bb.Size=UDim2.new(0,220,0,75)
+    bb.StudsOffset=Vector3.new(0,2.5,0); bb.AlwaysOnTop=false
+    bb.MaxDistance=60; bb.Parent=head
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "EB_Overhead"
-	billboard.Size = UDim2.new(0, 220, 0, 75)
-	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-	billboard.AlwaysOnTop = false
-	billboard.MaxDistance = 60
-	billboard.Parent = head
+    local bg = Instance.new("Frame")
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(0,0,0)
+    bg.BackgroundTransparency=0.45; bg.BorderSizePixel=0; bg.Parent=bb
+    local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,8); c.Parent=bg
 
-	-- Fundo semi-transparente
-	local bg = Instance.new("Frame")
-	bg.Size = UDim2.new(1, 0, 1, 0)
-	bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	bg.BackgroundTransparency = 0.45
-	bg.BorderSizePixel = 0
-	bg.Parent = billboard
+    local function lbl(name,y,size,bold)
+        local l=Instance.new("TextLabel"); l.Name=name
+        l.Size=UDim2.new(1,-8,0,size or 22); l.Position=UDim2.new(0,4,0,y)
+        l.BackgroundTransparency=1; l.Font=bold and Enum.Font.GothamBold or Enum.Font.GothamMedium
+        l.TextSize=bold and 15 or 13; l.TextColor3=Color3.fromRGB(255,255,255)
+        l.TextXAlignment=Enum.TextXAlignment.Center; l.Parent=bg; return l
+    end
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = bg
+    lbl("NomeLabel",    2,  24, true).Text = player.DisplayName
+    lbl("PatenteLabel", 26, 22, false)
+    lbl("DivisaoLabel", 49, 18, false).TextSize = 11
 
-	-- Label: Nome
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Name = "NomeLabel"
-	nameLabel.Size = UDim2.new(1, -8, 0, 24)
-	nameLabel.Position = UDim2.new(0, 4, 0, 2)
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Text = player.DisplayName
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextSize = 15
-	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	nameLabel.TextXAlignment = Enum.TextXAlignment.Center
-	nameLabel.Parent = bg
-
-	-- Label: Patente
-	local patenteLabel = Instance.new("TextLabel")
-	patenteLabel.Name = "PatenteLabel"
-	patenteLabel.Size = UDim2.new(1, -8, 0, 22)
-	patenteLabel.Position = UDim2.new(0, 4, 0, 26)
-	patenteLabel.BackgroundTransparency = 1
-	patenteLabel.Text = "Civil"
-	patenteLabel.Font = Enum.Font.Gotham
-	patenteLabel.TextSize = 13
-	patenteLabel.TextColor3 = PATENTE_CORES["Civil"]
-	patenteLabel.TextXAlignment = Enum.TextXAlignment.Center
-	patenteLabel.Parent = bg
-
-	-- Label: Divisão
-	local divisaoLabel = Instance.new("TextLabel")
-	divisaoLabel.Name = "DivisaoLabel"
-	divisaoLabel.Size = UDim2.new(1, -8, 0, 20)
-	divisaoLabel.Position = UDim2.new(0, 4, 0, 49)
-	divisaoLabel.BackgroundTransparency = 1
-	divisaoLabel.Text = "Nenhuma"
-	divisaoLabel.Font = Enum.Font.GothamMedium
-	divisaoLabel.TextSize = 11
-	divisaoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-	divisaoLabel.TextXAlignment = Enum.TextXAlignment.Center
-	divisaoLabel.Parent = bg
-
-	return billboard
+    return bb
 end
 
-local function updateOverhead(player, patente, divisao)
-	local character = player.Character
-	if not character then return end
-	local head = character:FindFirstChild("Head")
-	if not head then return end
-	local billboard = head:FindFirstChild("EB_Overhead")
-	if not billboard then
-		billboard = createOverhead(player, character)
-	end
-	if not billboard then return end
-
-	local bg = billboard:FindFirstChild("Frame") or billboard:FindFirstChildOfClass("Frame")
-	if not bg then return end
-
-	local pLabel = bg:FindFirstChild("PatenteLabel")
-	local dLabel = bg:FindFirstChild("DivisaoLabel")
-	if pLabel then
-		pLabel.Text = patente or "Civil"
-		pLabel.TextColor3 = PATENTE_CORES[patente] or Color3.fromRGB(200, 200, 200)
-	end
-	if dLabel then
-		dLabel.Text = divisao or "Nenhuma"
-	end
+local function refreshOverhead(player)
+    local data = cache[player.UserId]
+    if not data then return end
+    local char = player.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+    local bb = head:FindFirstChild("EB_Overhead")
+    if not bb then bb = createOverhead(player, char) end
+    if not bb then return end
+    local bg = bb:FindFirstChildOfClass("Frame")
+    if not bg then return end
+    local pL = bg:FindFirstChild("PatenteLabel")
+    local dL = bg:FindFirstChild("DivisaoLabel")
+    if pL then pL.Text=data.Patente; pL.TextColor3=RANK_COLOR[data.Patente] or Color3.fromRGB(200,200,200) end
+    if dL then dL.Text=data.Divisao end
 end
 
 -- ============================================================
@@ -337,462 +495,534 @@ end
 -- ============================================================
 
 local function setupLeaderstats(player, data)
-	local leaderstats = getOrCreate(player, "Folder", "leaderstats")
-
-	local dinheiro = getOrCreate(leaderstats, "IntValue", "Dinheiro")
-	dinheiro.Value = data.Dinheiro or 0
-
-	local cdp = getOrCreate(leaderstats, "IntValue", "CDP")
-	cdp.Value = data.CDP or 0
-
-	return leaderstats
+    local ls = getOrCreate(player, "Folder", "leaderstats")
+    local din = getOrCreate(ls, "IntValue", "Dinheiro")
+    din.Value = data.Dinheiro or 0
+    local cdp = getOrCreate(ls, "IntValue", "CDP")
+    cdp.Value = data.CDP or 0
+    return ls
 end
 
 -- ============================================================
--- TIME DO JOGADOR
+-- TIMES
 -- ============================================================
 
-local function setPlayerTeam(player, teamName)
-	local Teams = game:GetService("Teams")
-	local team = Teams:FindFirstChild(teamName)
-	if not team then
-		-- Cria o time se não existir
-		team = Instance.new("Team")
-		team.Name = teamName
-		team.AutoAssignable = false
-		team.TeamColor = BrickColor.new("Medium stone grey")
+local function ensureTeams()
+    local Teams = game:GetService("Teams")
+    local list = {
+        {"Civis [EB]","White"},
+        {"Praças [EB]","Bright green"},
+        {"Graduados [EB]","Dark green"},
+        {"Oficiais [EB]","Bright red"},
+        {"Oficiais Superiores [EB]","Bright blue"},
+        {"Honra [EB]","Bright yellow"},
+    }
+    for _, t in ipairs(list) do
+        if not Teams:FindFirstChild(t[1]) then
+            local tm=Instance.new("Team"); tm.Name=t[1]
+            tm.AutoAssignable=false; tm.TeamColor=BrickColor.new(t[2]); tm.Parent=Teams
+        end
+    end
+end
 
-		-- Cores por time
-		local teamColors = {
-			["Civis [EB]"]             = BrickColor.new("White"),
-			["Praças [EB]"]            = BrickColor.new("Bright green"),
-			["Graduados [EB]"]         = BrickColor.new("Dark green"),
-			["Oficiais [EB]"]          = BrickColor.new("Bright red"),
-			["Oficiais Superiores [EB]"]= BrickColor.new("Bright blue"),
-			["Honra [EB]"]             = BrickColor.new("Bright yellow"),
-		}
-		team.TeamColor = teamColors[teamName] or BrickColor.new("Medium stone grey")
-		team.Parent = Teams
-	end
-	player.Team = team
+local function setTeam(player, teamName)
+    local Teams = game:GetService("Teams")
+    local t = Teams:FindFirstChild(teamName)
+    if t then player.Team = t end
 end
 
 -- ============================================================
--- PLAYER ADDED
+-- PLAYER LIFECYCLE
 -- ============================================================
-
--- Guarda dados em memória para acesso rápido
-local playerDataCache = {}
 
 local function onPlayerAdded(player)
-	-- Carrega dados
-	local data = loadPlayerData(player)
-	playerDataCache[player.UserId] = data
+    -- Checa ban
+    if isBanned(player.UserId) then
+        for _,u in pairs(UNBANNABLES) do
+            if u:lower()==player.Name:lower() then goto skipban end
+        end
+        player:Kick("❌ Você está banido.\n— Administração [EB]")
+        return
+        ::skipban::
+    end
 
-	-- Leaderstats
-	setupLeaderstats(player, data)
+    local data = loadData(player)
+    cache[player.UserId] = data
 
-	-- Time
-	setPlayerTeam(player, data.Team or "Civis [EB]")
+    setupLeaderstats(player, data)
+    setTeam(player, data.Team or "Civis [EB]")
 
-	-- Overhead ao spawnar
-	local function onCharacterAdded(character)
-		-- Espera um frame para o personagem carregar
-		wait(0.1)
-		createOverhead(player, character)
-		-- Atualiza com dados salvos
-		wait(0.2)
-		updateOverhead(player, data.Patente, data.Divisao)
-		-- Notifica cliente sobre dados
-		UpdateUIRemote:FireClient(player, data)
-	end
+    local function onChar(char)
+        task.wait(0.15)
+        createOverhead(player, char)
+        task.wait(0.1)
+        refreshOverhead(player)
+        R_UpdateUI:FireClient(player, data)
+    end
 
-	player.CharacterAdded:Connect(onCharacterAdded)
-	if player.Character then
-		onCharacterAdded(player.Character)
-	end
+    player.CharacterAdded:Connect(onChar)
+    if player.Character then onChar(player.Character) end
 
-	-- Salva periodicamente
-	coroutine.wrap(function()
-		while player.Parent ~= nil do
-			wait(60)
-			local currentData = playerDataCache[player.UserId]
-			if currentData then
-				local ls = player:FindFirstChild("leaderstats")
-				if ls then
-					currentData.Dinheiro = ls:FindFirstChild("Dinheiro") and ls.Dinheiro.Value or currentData.Dinheiro
-					currentData.CDP = ls:FindFirstChild("CDP") and ls.CDP.Value or currentData.CDP
-				end
-				savePlayerData(player, currentData)
-			end
-		end
-	end)()
+    -- Auto-save a cada 60s
+    task.spawn(function()
+        while player.Parent do
+            task.wait(60)
+            local d = cache[player.UserId]
+            if d then
+                local ls = player:FindFirstChild("leaderstats")
+                if ls then
+                    if ls:FindFirstChild("Dinheiro") then d.Dinheiro=ls.Dinheiro.Value end
+                    if ls:FindFirstChild("CDP")      then d.CDP=ls.CDP.Value end
+                end
+                saveData(player, d)
+            end
+        end
+    end)
 end
 
 local function onPlayerRemoving(player)
-	local data = playerDataCache[player.UserId]
-	if data then
-		local ls = player:FindFirstChild("leaderstats")
-		if ls then
-			data.Dinheiro = ls:FindFirstChild("Dinheiro") and ls.Dinheiro.Value or data.Dinheiro
-			data.CDP = ls:FindFirstChild("CDP") and ls.CDP.Value or data.CDP
-		end
-		savePlayerData(player, data)
-		playerDataCache[player.UserId] = nil
-	end
+    local d = cache[player.UserId]
+    if d then
+        local ls = player:FindFirstChild("leaderstats")
+        if ls then
+            if ls:FindFirstChild("Dinheiro") then d.Dinheiro=ls.Dinheiro.Value end
+            if ls:FindFirstChild("CDP")      then d.CDP=ls.CDP.Value end
+        end
+        saveData(player, d)
+        cache[player.UserId] = nil
+    end
+    actionLog[player.UserId] = nil
 end
 
 -- ============================================================
--- REMOTE HANDLERS
+-- REMOTE: GetPlayerData
 -- ============================================================
 
--- GetPlayerData: cliente pede dados de um jogador
-GetPlayerDataRemote.OnServerInvoke = function(requester, targetName)
-	-- Qualquer um pode ver patentes (overhead público)
-	for _, p in pairs(Players:GetPlayers()) do
-		if p.Name == targetName or p.DisplayName == targetName then
-			return playerDataCache[p.UserId]
-		end
-	end
-	return nil
+R_GetData.OnServerInvoke = function(_, targetName)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Name:lower()==(targetName or ""):lower() or
+           p.DisplayName:lower()==(targetName or ""):lower() then
+            return cache[p.UserId]
+        end
+    end
+    return nil
 end
 
--- SetPatente: chamado internamente por definitionconfigs
-SetPatenteRemote.OnServerEvent:Connect(function(requester, targetPlayer, newPatente, newDivisao)
-	-- Só o servidor vai chamar isso via require, clientes não devem chamar diretamente
-	-- Validação: requester precisa ter permissão (checado em definitionconfigs)
-	-- Por segurança, checar no cache se requester tem patente de oficial+
-	local reqData = playerDataCache[requester.UserId]
-	if not reqData then return end
+-- ============================================================
+-- REMOTE: SetPatente (chamado por Graduados/Oficiais/etc)
+-- ============================================================
 
-	local authorizedTeams = {
-		["Graduados [EB]"] = true,
-		["Oficiais [EB]"] = true,
-		["Oficiais Superiores [EB]"] = true,
-		["Honra [EB]"] = true,
-	}
-	if not authorizedTeams[reqData.Team] then return end
+R_SetPatente.OnServerEvent:Connect(function(requester, target, newRank, newDiv)
+    -- Validações básicas
+    if not target or not target.Parent then return end
+    if not RANK_INDEX[newRank] then
+        logSuspect(requester, "Tentou setar patente inválida: "..tostring(newRank))
+        return
+    end
 
-	if not targetPlayer or not targetPlayer.Parent then return end
+    local reqData = cache[requester.UserId]
+    if not reqData then return end
 
-	local targetData = playerDataCache[targetPlayer.UserId]
-	if not targetData then return end
+    -- Determina tipo de ação para rate limit
+    local tgtData   = cache[target.UserId]
+    local tgtRank   = tgtData and (RANK_INDEX[tgtData.Patente] or 1) or 1
+    local newRankI  = RANK_INDEX[newRank]
+    local actionType = newRankI > tgtRank and "promote"
+                    or newRankI < tgtRank and "demote"
+                    or nil
 
-	targetData.Patente = newPatente
-	if newDivisao then
-		targetData.Divisao = newDivisao
-	end
+    if not actionType then
+        logSuspect(requester, "Tentou setar patente igual à atual.")
+        return
+    end
 
-	-- Atualiza time
-	local newTeam = PATENTE_PARA_TIME[newPatente] or targetData.Team
-	targetData.Team = newTeam
-	setPlayerTeam(targetPlayer, newTeam)
+    -- Rate limit
+    if not checkRateLimit(requester.UserId, actionType) then
+        logSuspect(requester, "Rate limit excedido para "..actionType)
+        warn("[EB-ANTIABUSOS] "..requester.Name.." bloqueado (rate limit "..actionType..")")
+        return
+    end
 
-	-- Salva
-	savePlayerData(targetPlayer, targetData)
+    -- Validação hierárquica
+    local allowed, reason = canActOn(requester, target, newRank, false)
+    if not allowed then
+        -- Notifica o requester do erro
+        local errEv = RF:FindFirstChild("NotifyError")
+        if errEv then errEv:FireClient(requester, reason) end
+        warn("[EB] "..requester.Name.." bloqueado: "..reason)
+        logSuspect(requester, "Ação inválida: "..reason)
+        return
+    end
 
-	-- Atualiza overhead
-	updateOverhead(targetPlayer, newPatente, targetData.Divisao)
+    -- Recrutamento (Civil → Recruta): graduados podem
+    -- Dispensa (qualquer → Civil): apenas Oficiais Superiores+
+    if newRank == "Civil" then
+        local reqAuth = getTeamAuth(reqData.Team)
+        if reqAuth < 4 then
+            logSuspect(requester, "Tentou dispensar sem autoridade de Oficial Superior.")
+            return
+        end
+    end
 
-	-- Notifica UI do alvo
-	UpdateUIRemote:FireClient(targetPlayer, targetData)
-end)
-
--- SetDivisao
-SetDivisaoRemote.OnServerEvent:Connect(function(requester, targetPlayer, newDivisao)
-	local reqData = playerDataCache[requester.UserId]
-	if not reqData then return end
-
-	local authorizedTeams = {
-		["Oficiais [EB]"] = true,
-		["Oficiais Superiores [EB]"] = true,
-		["Honra [EB]"] = true,
-	}
-	if not authorizedTeams[reqData.Team] then return end
-
-	if not targetPlayer or not targetPlayer.Parent then return end
-	local targetData = playerDataCache[targetPlayer.UserId]
-	if not targetData then return end
-
-	targetData.Divisao = newDivisao
-	savePlayerData(targetPlayer, targetData)
-	updateOverhead(targetPlayer, targetData.Patente, newDivisao)
-	UpdateUIRemote:FireClient(targetPlayer, targetData)
-end)
-
--- SetDinheiro (admin)
-SetDinheiroRemote.OnServerEvent:Connect(function(requester, targetPlayer, amount)
-	local reqData = playerDataCache[requester.UserId]
-	if not reqData then return end
-	-- Só admins (verificado via lista em definitionconfigs, aqui aceitamos confiança do servidor)
-	if not targetPlayer or not targetPlayer.Parent then return end
-	local targetData = playerDataCache[targetPlayer.UserId]
-	if not targetData then return end
-
-	targetData.Dinheiro = amount
-	local ls = targetPlayer:FindFirstChild("leaderstats")
-	if ls and ls:FindFirstChild("Dinheiro") then
-		ls.Dinheiro.Value = amount
-	end
-	savePlayerData(targetPlayer, targetData)
-	UpdateUIRemote:FireClient(targetPlayer, targetData)
+    local ok = applyRankChange(target, newRank, newDiv, true, false)
+    if ok then
+        print(string.format("[EB] %s → %s promovido/rebaixado para %s por %s",
+            target.Name, tgtData and tgtData.Patente or "?", newRank, requester.Name))
+    end
 end)
 
 -- ============================================================
--- FUNÇÕES EXPORTADAS (para outros scripts via require)
+-- REMOTE: SetDivisao
 -- ============================================================
 
-local EBModule = {}
+R_SetDivisao.OnServerEvent:Connect(function(requester, target, newDiv)
+    local reqData = cache[requester.UserId]
+    if not reqData then return end
+    local auth = getTeamAuth(reqData.Team)
+    if auth < 3 then return end   -- mínimo Oficial
+    if not target or not target.Parent then return end
+    local tgtData = cache[target.UserId]
+    if not tgtData then return end
+    tgtData.Divisao = newDiv or "Nenhuma"
+    saveData(target, tgtData)
+    local char = target.Character
+    if char then
+        local head = char:FindFirstChild("Head")
+        if head then
+            local bb = head:FindFirstChild("EB_Overhead")
+            if bb then
+                local bg = bb:FindFirstChildOfClass("Frame")
+                local dL = bg and bg:FindFirstChild("DivisaoLabel")
+                if dL then dL.Text = tgtData.Divisao end
+            end
+        end
+    end
+    R_UpdateUI:FireClient(target, tgtData)
+end)
 
-EBModule.playerDataCache    = playerDataCache
-EBModule.PATENTE_CORES      = PATENTE_CORES
-EBModule.PATENTE_PARA_TIME  = PATENTE_PARA_TIME
-EBModule.DEFAULT_DATA       = DEFAULT_DATA
+-- ============================================================
+-- REMOTE: SetDinheiro (qualquer autoridade pode ver, mas mudar = admin)
+-- ============================================================
 
-EBModule.savePlayerData     = savePlayerData
-EBModule.loadPlayerData     = loadPlayerData
-EBModule.updateOverhead     = updateOverhead
-EBModule.setPlayerTeam      = setPlayerTeam
-EBModule.setupLeaderstats   = setupLeaderstats
-EBModule.createOverhead     = createOverhead
+R_SetDinheiro.OnServerEvent:Connect(function(requester, target, amount)
+    if not isAdmin(requester.Name) then
+        logSuspect(requester, "Tentou setar dinheiro sem ser admin.")
+        return
+    end
+    if not target or not target.Parent then return end
+    local data = cache[target.UserId]
+    if not data then return end
+    local v = math.max(0, math.min(tonumber(amount) or 0, 999999999))
+    data.Dinheiro = v
+    local ls = target:FindFirstChild("leaderstats")
+    if ls and ls:FindFirstChild("Dinheiro") then ls.Dinheiro.Value = v end
+    saveData(target, data)
+    R_UpdateUI:FireClient(target, data)
+end)
 
-EBModule.RemotesFolder      = RemotesFolder
-EBModule.UpdateOverheadRemote = UpdateOverheadRemote
-EBModule.GetPlayerDataRemote  = GetPlayerDataRemote
-EBModule.SetPatenteRemote     = SetPatenteRemote
-EBModule.SetDivisaoRemote     = SetDivisaoRemote
-EBModule.SetDinheiroRemote    = SetDinheiroRemote
-EBModule.UpdateUIRemote       = UpdateUIRemote
+-- ============================================================
+-- REMOTE: AdminSetPatente (bypass CDP e hierarquia — apenas admins)
+-- ============================================================
+
+R_AdminSetP.OnServerEvent:Connect(function(requester, target, newRank, newDiv)
+    if not isAdmin(requester.Name) then
+        logSuspect(requester, "Tentou usar AdminSetPatente sem ser admin.")
+        return
+    end
+    if not target or not target.Parent then return end
+    if not RANK_INDEX[newRank] then return end
+    if isDev(target.Name) and not isDev(requester.Name) then return end
+
+    -- Admin pode setar qualquer patente para qualquer pessoa, incluindo Civil
+    applyRankChange(target, newRank, newDiv or "[EB]", false, true)  -- skipCDPAdd=true para admin
+    print(string.format("[EB-ADMIN] %s → %s setado para %s por admin %s",
+        target.Name, newRank, newDiv or "[EB]", requester.Name))
+end)
+
+-- ============================================================
+-- REMOTE: AdminSetDivisao
+-- ============================================================
+
+R_AdminSetDiv.OnServerEvent:Connect(function(requester, target, div)
+    if not isAdmin(requester.Name) then return end
+    if not target or not target.Parent then return end
+    local data = cache[target.UserId]
+    if not data then return end
+    data.Divisao = div or "Nenhuma"
+    saveData(target, data)
+    refreshOverhead(target)
+    R_UpdateUI:FireClient(target, data)
+end)
+
+-- ============================================================
+-- REMOTE: AdminSetCDP
+-- ============================================================
+
+R_AdminSetCDP.OnServerEvent:Connect(function(requester, target, val)
+    if not isAdmin(requester.Name) then return end
+    if not target or not target.Parent then return end
+    local data = cache[target.UserId]
+    if not data then return end
+    data.CDP = math.max(0, tonumber(val) or 0)
+    local ls = target:FindFirstChild("leaderstats")
+    if ls and ls:FindFirstChild("CDP") then ls.CDP.Value = data.CDP end
+    saveData(target, data)
+    R_UpdateUI:FireClient(target, data)
+end)
+
+-- ============================================================
+-- REMOTE: AdminResetStats
+-- ============================================================
+
+R_AdminReset.OnServerEvent:Connect(function(requester, target)
+    if not isAdmin(requester.Name) then return end
+    if not target or not target.Parent then return end
+    local data = cache[target.UserId]
+    if not data then return end
+    data.Dinheiro=0; data.CDP=0
+    local ls = target:FindFirstChild("leaderstats")
+    if ls then
+        if ls:FindFirstChild("Dinheiro") then ls.Dinheiro.Value=0 end
+        if ls:FindFirstChild("CDP")      then ls.CDP.Value=0 end
+    end
+    saveData(target, data)
+    R_UpdateUI:FireClient(target, data)
+end)
+
+-- ============================================================
+-- REMOTE: AdminSetTime (time direto, sem mudar patente)
+-- ============================================================
+
+R_AdminSetTime.OnServerEvent:Connect(function(requester, target, teamName)
+    if not isAdmin(requester.Name) then return end
+    if not target or not target.Parent then return end
+    local data = cache[target.UserId]
+    if not data then return end
+    data.Team = teamName
+    setTeam(target, teamName)
+    saveData(target, data)
+end)
+
+-- ============================================================
+-- REMOTE: AdminUnban
+-- ============================================================
+
+R_AdminUnban.OnServerEvent:Connect(function(requester, userId)
+    if not isAdmin(requester.Name) then return end
+    unbanUser(tostring(userId))
+    print("[EB-ADMIN] Unban aplicado: UserID "..tostring(userId).." por "..requester.Name)
+end)
+
+-- ============================================================
+-- REMOTE: Punish (kick / ban)
+-- ============================================================
+
+R_Punish.OnServerEvent:Connect(function(requester, action, targetName, reason)
+    if not isAdmin(requester.Name) then
+        logSuspect(requester, "Tentou punir sem ser admin.")
+        return
+    end
+    local tp = nil
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Name:lower()==(targetName or ""):lower() then tp=p; break end
+    end
+    if action=="kick" and tp then
+        tp:Kick("⚠️ Kickado.\nMotivo: "..(reason or "N/A").."\n— [EB]")
+    elseif action=="ban" then
+        for _,u in pairs(UNBANNABLES) do if (targetName or ""):lower()==u:lower() then return end end
+        if tp then
+            banUser(tp.UserId, reason)
+            tp:Kick("🔨 Banido.\nMotivo: "..(reason or "N/A").."\n— [EB]")
+        end
+    end
+end)
+
+-- ============================================================
+-- REMOTES: Player Controls (GodMode, Freeze, Kill, Speed, Jump, Bring)
+-- ============================================================
+
+local godModes = {}
+local freezes  = {}
+
+R_AdminGod.OnServerEvent:Connect(function(req, target)
+    if not isAdmin(req.Name) then return end
+    if not target or not target.Parent then return end
+    local char = target.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    godModes[target.UserId] = not godModes[target.UserId]
+    hum.MaxHealth = godModes[target.UserId] and math.huge or 100
+    hum.Health    = hum.MaxHealth
+end)
+
+R_AdminFreeze.OnServerEvent:Connect(function(req, target)
+    if not isAdmin(req.Name) then return end
+    if not target or not target.Parent then return end
+    local char = target.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    freezes[target.UserId] = not freezes[target.UserId]
+    hrp.Anchored = freezes[target.UserId]
+end)
+
+R_AdminKill.OnServerEvent:Connect(function(req, target)
+    if not isAdmin(req.Name) then return end
+    if not target or not target.Parent then return end
+    local char = target.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.Health = 0 end
+end)
+
+R_AdminSpeed.OnServerEvent:Connect(function(req, target, speed)
+    if not isAdmin(req.Name) then return end
+    if not target or not target.Parent then return end
+    local char = target.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = math.clamp(tonumber(speed) or 16, 0, 500) end
+end)
+
+R_AdminJump.OnServerEvent:Connect(function(req, target, power)
+    if not isAdmin(req.Name) then return end
+    if not target or not target.Parent then return end
+    local char = target.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = math.clamp(tonumber(power) or 50, 0, 500) end
+end)
+
+R_AdminBring.OnServerEvent:Connect(function(req, target, dest)
+    if not isAdmin(req.Name) then return end
+    if not target or not target.Parent then return end
+    if not dest   or not dest.Parent   then return end
+    local dHRP = dest.Character   and dest.Character:FindFirstChild("HumanoidRootPart")
+    local tHRP = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+    if dHRP and tHRP then tHRP.CFrame = dHRP.CFrame + Vector3.new(math.random(-3,3),0,math.random(-3,3)) end
+end)
+
+R_Teleport.OnServerEvent:Connect(function(req, target, dest)
+    -- Teleporte de treinamento: oficiais podem chamar
+    local reqData = cache[req.UserId]
+    local auth = reqData and getTeamAuth(reqData.Team) or 0
+    if not isAdmin(req.Name) and auth < 3 then return end
+    if not target or not target.Parent then return end
+    if not dest   or not dest.Parent   then return end
+    local dHRP = dest.Character   and dest.Character:FindFirstChild("HumanoidRootPart")
+    local tHRP = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+    if dHRP and tHRP then tHRP.CFrame = dHRP.CFrame + Vector3.new(math.random(-4,4),0,math.random(-4,4)) end
+end)
+
+-- ============================================================
+-- REMOTE: AdminMessage
+-- ============================================================
+
+R_AdminMsg.OnServerEvent:Connect(function(req, dest, msg)
+    if not isAdmin(req.Name) then return end
+    if type(msg)~="string" or #msg>300 then return end
+    local lower = (dest or ""):lower()
+    if lower=="todos" or lower=="all" or lower=="" then
+        for _, p in pairs(Players:GetPlayers()) do R_AdminMsgCli:FireClient(p, msg, req.Name) end
+    else
+        local tp = nil
+        for _, p in pairs(Players:GetPlayers()) do if p.Name:lower()==lower then tp=p; break end end
+        if tp then R_AdminMsgCli:FireClient(tp, msg, req.Name) end
+    end
+end)
+
+-- ============================================================
+-- REMOTE: AdminShutdown
+-- ============================================================
+
+R_AdminShutdown.OnServerEvent:Connect(function(req)
+    if not isAdmin(req.Name) then return end
+    print("[EB-ADMIN] Shutdown por "..req.Name)
+    for _, p in pairs(Players:GetPlayers()) do
+        p:Kick("🔴 Servidor encerrado pela administração. Volte em breve.")
+    end
+end)
+
+-- ============================================================
+-- REMOTE: Webhook (rate limited)
+-- ============================================================
+
+local whCooldown = {}
+R_Webhook.OnServerEvent:Connect(function(player, msg)
+    if type(msg)~="string" or #msg>500 then return end
+    local now = os.time()
+    if whCooldown[player.UserId] and now - whCooldown[player.UserId] < 3 then return end
+    whCooldown[player.UserId] = now
+    local WEBHOOK_URL = "https://discord.com/api/webhooks/1227399866301284483/3mHVx1HSxxUwlbHoOP3bLvp7jF59MTfkwa1mMsfd3BZMmOwwAzOsAmxi3ssirK2_q5wd"
+    pcall(function()
+        game:GetService("HttpService"):PostAsync(WEBHOOK_URL,
+            game:GetService("HttpService"):JSONEncode({content=msg, username="EB Sistema 🪖"}),
+            Enum.HttpContentType.ApplicationJson)
+    end)
+end)
+
+-- ============================================================
+-- REMOTE: DevExecute
+-- ============================================================
+
+R_DevExec.OnServerEvent:Connect(function(req, code)
+    if not isDev(req.Name) then return end
+    if type(code)~="string" then return end
+    local fn, e = loadstring(code)
+    if not fn then warn("[EB-DEV] "..tostring(e)); return end
+    local ok, r = pcall(fn)
+    if not ok then warn("[EB-DEV] "..tostring(r)) else print("[EB-DEV] exec ok — "..req.Name) end
+end)
+
+-- BindableEvent para admin interno
+R_SrvSetP.Event:Connect(function(target, newRank, newDiv)
+    if not target or not target.Parent then return end
+    if not RANK_INDEX[newRank] then return end
+    applyRankChange(target, newRank, newDiv, false, true)
+end)
+
+-- ============================================================
+-- ANTI-CHEAT (varredura periódica)
+-- ============================================================
+
+task.spawn(function()
+    while true do
+        task.wait(30)
+        pcall(function()
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if (obj:IsA("LocalScript") or obj:IsA("Script")) and
+                   not obj:IsDescendantOf(game:GetService("StarterPlayer")) and
+                   not obj:IsDescendantOf(game:GetService("StarterGui")) then
+                    local name = obj.Name:lower()
+                    local sus = {"dex","infiniteyield","executor","hack","inject","cheat","exploit"}
+                    for _, s in pairs(sus) do
+                        if name:find(s) then
+                            warn("[EB-ANTICHEAT] Script suspeito: "..obj:GetFullName())
+                            pcall(function() obj:Destroy() end)
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end)
 
 -- ============================================================
 -- INICIALIZAÇÃO
 -- ============================================================
 
-if RunService:IsServer() then
-	-- Times padrão
-	local teamList = {
-		"Civis [EB]", "Praças [EB]", "Graduados [EB]",
-		"Oficiais [EB]", "Oficiais Superiores [EB]", "Honra [EB]"
-	}
-	for _, tName in pairs(teamList) do
-		setPlayerTeam({Team = nil, Parent = game}, tName)
-		pcall(function()
-			local Teams = game:GetService("Teams")
-			if not Teams:FindFirstChild(tName) then
-				local t = Instance.new("Team")
-				t.Name = tName
-				t.AutoAssignable = false
-				t.Parent = Teams
-			end
-		end)
-	end
+ensureTeams()
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
 
-	Players.PlayerAdded:Connect(onPlayerAdded)
-	Players.PlayerRemoving:Connect(onPlayerRemoving)
-
-	-- Jogadores já conectados
-	for _, player in pairs(Players:GetPlayers()) do
-		coroutine.wrap(onPlayerAdded)(player)
-	end
-
-	print("[EB] basicfuncs carregado com sucesso!")
+for _, p in pairs(Players:GetPlayers()) do
+    task.spawn(onPlayerAdded, p)
 end
 
-return EBModule
-
--- ============================================================
--- REMOTES EXTRAS PARA ADMIN (adicionados na v2.0)
--- ============================================================
-
-local AdminSetDivisao  = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSetDivisao")
-local AdminSetCDP      = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSetCDP")
-local AdminResetStats  = getOrCreate(RemotesFolder, "RemoteEvent", "AdminResetStats")
-local AdminSetTime     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSetTime")
-local AdminUnban       = getOrCreate(RemotesFolder, "RemoteEvent", "AdminUnban")
-local AdminGodMode     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminGodMode")
-local AdminFreeze      = getOrCreate(RemotesFolder, "RemoteEvent", "AdminFreeze")
-local AdminKillPlayer  = getOrCreate(RemotesFolder, "RemoteEvent", "AdminKillPlayer")
-local AdminSpeedSet    = getOrCreate(RemotesFolder, "RemoteEvent", "AdminSpeedSet")
-local AdminJumpSet     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminJumpSet")
-local AdminMessage     = getOrCreate(RemotesFolder, "RemoteEvent", "AdminMessage")
-local AdminShutdown    = getOrCreate(RemotesFolder, "RemoteEvent", "AdminShutdown")
-local AdminBringPlayer = getOrCreate(RemotesFolder, "RemoteEvent", "AdminBringPlayer")
-
--- Tabela de GodMode e Freeze ativos
-local godModePlayers = {}
-local frozenPlayers  = {}
-
--- Valida se quem chama tem permissão de admin
-local function isAuthorized(player)
-	local data = playerDataCache[player.UserId]
-	local devs = {"sydgei10","BolinhoFofo1236"}
-	for _, d in pairs(devs) do
-		if d:lower() == player.Name:lower() then return true end
-	end
-	if data and (data.Team == "Honra [EB]") then return true end
-	return false
+-- Notifica EBLoader para preencher adminList
+local AdminListBind = getOrCreate(RF, "BindableFunction", "SetAdminList")
+AdminListBind.OnInvoke = function(list)
+    adminList = list or {}
+    print("[EB] Lista de admins recebida: "..tostring(#list).." entradas")
 end
 
--- AdminSetDivisao
-AdminSetDivisao.OnServerEvent:Connect(function(req, target, div)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local data = playerDataCache[target.UserId]
-	if not data then return end
-	data.Divisao = div
-	savePlayerData(target, data)
-	updateOverhead(target, data.Patente, div)
-	UpdateUIRemote:FireClient(target, data)
-end)
+-- Remote de erro para cliente
+getOrCreate(RF, "RemoteEvent", "NotifyError")
 
--- AdminSetCDP
-AdminSetCDP.OnServerEvent:Connect(function(req, target, val)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local data = playerDataCache[target.UserId]
-	if not data then return end
-	data.CDP = val or 0
-	local ls = target:FindFirstChild("leaderstats")
-	if ls and ls:FindFirstChild("CDP") then ls.CDP.Value = val end
-	savePlayerData(target, data)
-end)
-
--- AdminResetStats
-AdminResetStats.OnServerEvent:Connect(function(req, target)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local data = playerDataCache[target.UserId]
-	if not data then return end
-	data.Dinheiro = 0; data.CDP = 0
-	local ls = target:FindFirstChild("leaderstats")
-	if ls then
-		if ls:FindFirstChild("Dinheiro") then ls.Dinheiro.Value = 0 end
-		if ls:FindFirstChild("CDP") then ls.CDP.Value = 0 end
-	end
-	savePlayerData(target, data)
-	UpdateUIRemote:FireClient(target, data)
-end)
-
--- AdminSetTime (move jogador para um time específico)
-AdminSetTime.OnServerEvent:Connect(function(req, target, teamName)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local data = playerDataCache[target.UserId]
-	if not data then return end
-	data.Team = teamName
-	setPlayerTeam(target, teamName)
-	savePlayerData(target, data)
-end)
-
--- AdminUnban (por UserId)
-AdminUnban.OnServerEvent:Connect(function(req, userId)
-	if not isAuthorized(req) then return end
-	local BanStore = game:GetService("DataStoreService"):GetDataStore("EBBanList_v1")
-	pcall(function() BanStore:RemoveAsync("Ban_"..tostring(userId)) end)
-	print("[EB-ADMIN] Unban aplicado para UserID: "..tostring(userId))
-end)
-
--- AdminGodMode
-AdminGodMode.OnServerEvent:Connect(function(req, target)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local char = target.Character
-	if not char then return end
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	godModePlayers[target.UserId] = not godModePlayers[target.UserId]
-	if godModePlayers[target.UserId] then
-		hum.MaxHealth = math.huge
-		hum.Health    = math.huge
-	else
-		hum.MaxHealth = 100
-		hum.Health    = 100
-	end
-end)
-
--- AdminFreeze
-AdminFreeze.OnServerEvent:Connect(function(req, target)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local char = target.Character
-	if not char then return end
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return end
-	frozenPlayers[target.UserId] = not frozenPlayers[target.UserId]
-	hrp.Anchored = frozenPlayers[target.UserId]
-end)
-
--- AdminKillPlayer
-AdminKillPlayer.OnServerEvent:Connect(function(req, target)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local char = target.Character
-	if not char then return end
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if hum then hum.Health = 0 end
-end)
-
--- AdminSpeedSet
-AdminSpeedSet.OnServerEvent:Connect(function(req, target, speed)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local char = target.Character
-	if not char then return end
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = math.clamp(speed or 16, 0, 500) end
-end)
-
--- AdminJumpSet
-AdminJumpSet.OnServerEvent:Connect(function(req, target, power)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	local char = target.Character
-	if not char then return end
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if hum then hum.JumpPower = math.clamp(power or 50, 0, 500) end
-end)
-
--- AdminMessage (exibe hint/mensagem na tela do jogador alvo)
-local AdminMsgClient = getOrCreate(RemotesFolder, "RemoteEvent", "AdminMsgClient")
-AdminMessage.OnServerEvent:Connect(function(req, dest, msg)
-	if not isAuthorized(req) then return end
-	if dest:lower() == "todos" or dest:lower() == "all" then
-		for _, p in pairs(Players:GetPlayers()) do
-			AdminMsgClient:FireClient(p, msg, req.Name)
-		end
-	else
-		local tp = nil
-		for _, p in pairs(Players:GetPlayers()) do
-			if p.Name:lower()==dest:lower() then tp=p; break end
-		end
-		if tp then AdminMsgClient:FireClient(tp, msg, req.Name) end
-	end
-end)
-
--- AdminShutdown
-AdminShutdown.OnServerEvent:Connect(function(req)
-	if not isAuthorized(req) then return end
-	print("[EB-ADMIN] Shutdown iniciado por "..req.Name)
-	for _, p in pairs(Players:GetPlayers()) do
-		p:Kick("🔴 O servidor foi encerrado pela administração.\nEntre novamente em breve.")
-	end
-end)
-
--- AdminBringPlayer (bring target to dest)
-AdminBringPlayer.OnServerEvent:Connect(function(req, target, dest)
-	if not isAuthorized(req) then return end
-	if not target or not target.Parent then return end
-	if not dest or not dest.Parent then return end
-	local dChar = dest.Character
-	local dHRP  = dChar and dChar:FindFirstChild("HumanoidRootPart")
-	local tChar = target.Character
-	local tHRP  = tChar and tChar:FindFirstChild("HumanoidRootPart")
-	if dHRP and tHRP then
-		tHRP.CFrame = dHRP.CFrame + Vector3.new(math.random(-3,3),0,math.random(-3,3))
-	end
-end)
-
--- Mensagem de admin no cliente (recepção)
--- (este handler fica no definitionconfigs — aqui só registramos o remote)
-
-print("[EB] Remotes de Admin v2.0 registrados!")
+print("[EB] basicfuncs v3.0 carregado!")
